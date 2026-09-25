@@ -1,0 +1,27 @@
+{
+  "name": "r1-skywave",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --serve",
+    "test": "vitest run",
+    "typecheck": "tsc -p .",
+    "data": "tsx scripts/build-data.ts",
+    "texture": "node scripts/fetch-texture.mjs",
+    "qr": "node scripts/make-qr.mjs",
+    "e2e": "playwright test",
+    "budgets": "node scripts/check-budgets.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "qrcode": "^1.5.4",
+    "qrcode-generator": "1.4.4",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
