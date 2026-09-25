@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=240, initial-scale=1, user-scalable=no">
+<title>r1 probe</title>
+<style>
+  html,body{margin:0;background:#000;color:#eee;font:11px/1.35 system-ui,sans-serif;width:240px;height:282px;overflow:hidden}
+  #page{position:absolute;left:0;top:0;right:0;bottom:30px;padding:6px;overflow:hidden}
+  #bar{position:absolute;left:0;right:0;bottom:0;height:30px;display:flex;gap:4px;padding:2px 4px;box-sizing:border-box}
+  button{flex:1;background:#222;color:#fff;border:1px solid #555;border-radius:6px;font:11px system-ui}
+  h1{font-size:13px;margin:0 0 4px;white-space:nowrap;overflow:hidden} pre{white-space:pre-wrap;word-break:break-all;margin:0}
+  .ok{color:#7f7}.bad{color:#f77}.warn{color:#fd6}
+  #qr{background:#fff;display:inline-block} #qr img{display:block;image-rendering:pixelated}
+</style>
+</head>
+<body>
+<div id="page"></div>
+<div id="bar"><button id="prev">&lt;</button><button id="act">Run</button><button id="next">&gt;</button></div>
+<script src="qrcode.js" defer></script>
+<script>
+(function () {
+  'use strict';
+  var HTTPS_MP3 = 'https://stream.radioparadise.com/mp3-128';
+  var HTTPS_AAC = 'https://stream.radioparadise.com/aac-128';
+  var HTTP_MP3 = 'http://stream.radioparadise.com/mp3-128';   // this host also serves https: the WebView may upgrade it
+  var RB = 'https://de1.api.radio-browser.info';
+  var BG_KEY = 'probe-bg-log', RES_KEY = 'probe-results', PTT_KEY = 'probe-ptt-armed';
+  var page = document.getElementById('page');
+  var R = load(RES_KEY);
+  if (!R || typeof R !== 'object' || R.v !== 2) R = { v: 2 };   // v2 = result shape of this probe version
+  var audio = null, cur = 0, lastPtr = -1;
+
+  function load(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+  function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  function save() { lsSet(RES_KEY, JSON.stringify(R)); }
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function show(title, lines) { page.innerHTML = '<h1>' + esc(title) + '</h1><pre>' + esc(lines.join('\n')) + '</pre>'; }
+  function now() { return Math.round(performance.now()); }
+  function getAudio() { if (!audio) { audio = new Audio(); audio.preload = 'none'; } return audio; }
+  function stopAudio() { if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); } }
+
+  // Resolves with 'playing' | 'error:<code>' | 'timeout' | 'reject:<name>'
+  function tryPlay(url, ms) {
+    return new Promise(function (resolve) {
+      var a = getAudio(), done = false;
+      function fin(v) { if (done) return; done = true; clearTimeout(t); a.onplaying = a.onerror = null; resolve(v); }
+      var t = setTimeout(function () { fin('timeout'); }, ms);
+      a.onplaying = function () { fin('playing'); };
+      a.onerror = function () { fin('error:' + (a.error ? a.error.code : '?')); };
+      a.src = url;
+      var p = a.play();
+      if (p && p.catch) p.catch(function (e) { fin('reject:' + e.name); });
+    });
+  }
+
+  function env() {
+    var c = document.createElement('canvas');
+    var gl = null, gl2 = null;
+    try { gl = c.getContext('webgl', { failIfMajorPerformanceCaveat: true }); } catch (e) {}
+    try { gl2 = document.createElement('canvas').getContext('webgl2'); } catch (e) {}
+    var dbg = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    var a = document.createElement('audio');
+    return {
+      ua: navigator.userAgent, dpr: devicePixelRatio, vw: innerWidth, vh: innerHeight,
+      sw: screen.width, sh: screen.height,
+      webgl: !!gl, webgl2: !!gl2,
+      glr: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null,
+      mse: typeof MediaSource !== 'undefined',
+      mp3: a.canPlayType('audio/mpeg'), aac: a.canPlayType('audio/aac'),
+      ogg: a.canPlayType('audio/ogg'), hls: a.canPlayType('application/vnd.apple.mpegurl'),
+      ms: 'mediaSession' in navigator, ac: typeof AudioContext !== 'undefined',
+      cs: typeof window.creationStorage, pmh: typeof window.PluginMessageHandler,
+      cvh: typeof window.CreationVoiceHandler, teh: typeof window.TouchEventHandler,
+      cwv: typeof window.closeWebView, sensors: typeof window.creationSensors,
+      ls: (function () { try { localStorage.setItem('x', '1'); return true; } catch (e) { return false; } })(),
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone
+    };
+  }
+
+  // Page 1: environment
+  function pageEnv() { R.env = env(); save(); var e = R.env, out = [];
+    for (var k in e) out.push(k + ': ' + e[k]); show('1/8 Environment', out); }
+
+  // Page 2: buttons. Counts only while this page is open; the stored result survives a reload.
+  // trusted: one char per event in BTN_EV order, 1 = isTrusted, 0 = synthetic, - = not seen.
+  var BTN_EV = ['scrollUp', 'scrollDown', 'sideClick', 'longPressStart', 'longPressEnd'];
+  var btn = { up: 0, down: 0, click: [], lpS: 0, lpE: 0, lpMs: [], trusted: {} };
+  var lpT = 0;
+  BTN_EV.forEach(function (n) {
+    window.addEventListener(n, function (e) {
+      if (cur !== 1) return;
+      btn.trusted[n] = e.isTrusted;
+      if (n === 'scrollUp') btn.up++;
+      else if (n === 'scrollDown') btn.down++;
+      else if (n === 'sideClick') btn.click.push(now());
+      else if (n === 'longPressStart') { btn.lpS++; lpT = now(); }
+      else { btn.lpE++; btn.lpMs.push(now() - lpT); }
+      recBtn(); pageBtn();
+    });
+  });
+  function recBtn() {
+    var gaps = [], tr = '';
+    for (var i = 1; i < btn.click.length; i++) { var g = btn.click[i] - btn.click[i - 1]; if (g < 500) gaps.push(g); }   // double-click gaps only
+    for (var j = 0; j < BTN_EV.length; j++) { var t = btn.trusted[BTN_EV[j]]; tr += t === undefined ? '-' : t ? '1' : '0'; }
+    R.btn = { up: btn.up, down: btn.down, clicks: btn.click.length, gaps: gaps.slice(-6), lpS: btn.lpS, lpE: btn.lpE,
+      lpMs: btn.lpMs.slice(-3), trusted: tr }; save();
+  }
+  function pageBtn() {
+    show('2/8 Buttons', ['Turn wheel up 3x, down 3x.', 'Click side button once,', 'then double click, then hold 2 s.', '',
+      JSON.stringify(R.btn || null)]);
+  }
+  window.addEventListener('pointerdown', function (e) { lastPtr = now(); R.ptr = { type: e.pointerType, trusted: e.isTrusted }; });
+
+  // Page 3: can the side button start audio with no tap before it? Run only arms the test; the user then
+  // closes and reopens the creation, which opens straight on this page, armed, with no touch since the load.
+  var pttArmed = '';   // '' | 'load' (reopened with a fresh page) | 'resume' (same page shown again) | 'session' (no storage)
+  function pttFlag() { try { return localStorage.getItem(PTT_KEY) === '1'; } catch (e) { return false; } }
+  window.addEventListener('sideClick', function () {
+    if (!pttArmed || cur !== 2) return;
+    var ua = navigator.userActivation, p = { armed: pttArmed, uaActive: ua ? ua.isActive : null,
+      uaHasBeen: ua ? ua.hasBeenActive : null, msSincePtr: lastPtr < 0 ? null : now() - lastPtr, result: 'pending' };
+    R.ptt = p; pttArmed = ''; lsDel(PTT_KEY); save(); pagePtt();
+    stopAudio(); audio = null;   // fresh element: one unlocked by an earlier tap-started play() would skew the result
+    tryPlay(HTTPS_MP3, 8000).then(function (r) { p.result = r; save(); stopAudio(); if (cur === 2) pagePtt(); });
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && cur === 2 && !pttArmed && pttFlag()) { pttArmed = 'resume'; pagePtt(); }
+  });
+  function pttRun() { pttArmed = ''; if (!lsSet(PTT_KEY, '1')) pttArmed = 'session'; pagePtt(); }
+  function pagePtt() {
+    var s = pttArmed ? ['ARMED (' + pttArmed + '). Do not touch the', 'screen. Press the SIDE button once.']
+      : pttFlag() ? ['Set. Now close the probe and', 'reopen it. It opens here, armed.']
+      : ['Run, then close the probe and reopen', 'it. It opens here, armed: press the', 'SIDE button without touching the screen.'];
+    show('3/8 PTT autoplay', s.concat(['', 'result: ' + JSON.stringify(R.ptt || null)]));
+  }
+
+  // Page 4: tap-started audio: https mp3/aac, http on a host that also serves https (may be upgraded),
+  // http on an explicit non-default port that cannot be upgraded (from Radio Browser), native HLS.
+  var tapBusy = false, tapRun = 0;
+  function pick(list, ok) {
+    for (var i = 0; i < list.length; i++) { var s = list[i];
+      if (s && typeof s.url_resolved === 'string' && s.lastcheckok === 1 && ok(s)) return s; }
+    return null;
+  }
+  function pageTap(run) {
+    if (!run || tapBusy) return show('4/8 Streams', [tapBusy ? 'running...' : 'Tap Run. Takes up to 60 s.', '', JSON.stringify(R.tap || {})]);
+    var tok = ++tapRun, T = R.tap = {}, list = [];
+    tapBusy = true; show('4/8 Streams', ['running...']);
+    function play(key, url) {
+      if (tok !== tapRun) throw new Error('left the page');
+      return tryPlay(url, 10000).then(function (r) { T[key] = r; stopAudio(); });
+    }
+    var rb = fetch(RB + '/json/stations/topclick/300').then(function (x) { T.rbCors = x.ok; return x.json(); })
+      .then(function (j) { if (Array.isArray(j)) list = j; else T.rbCors = 'not a list'; },
+        function (e) { T.rbCors = 'fail:' + e.name; });
+    play('httpsMp3', HTTPS_MP3)   // first play() runs inside the tap, so the gesture unlocks the element
+      .then(function () { return play('httpsAac', HTTPS_AAC); })
+      .then(function () { return play('httpMp3', HTTP_MP3); })
+      .then(function () { return rb; })
+      .then(function () {
+        var p = pick(list, function (s) { var m = /^http:\/\/[^\/?#:]+:(\d+)/.exec(s.url_resolved); return !!m && m[1] !== '80' && s.codec === 'MP3'; });
+        if (!p) { T.httpPort = 'no candidate'; return; }
+        T.httpPortUrl = p.url_resolved.slice(0, 40);
+        return play('httpPort', p.url_resolved);
+      })
+      .then(function () {
+        var h = pick(list, function (s) { return s.hls === 1 && /^https:/.test(s.url_resolved); });
+        if (!h) { T.hls = 'no candidate'; return; }
+        T.hlsUrl = h.url_resolved.slice(0, 40);
+        return play('hls', h.url_resolved);
+      })
+      .catch(function (e) { T.err = String(e && e.message || e).slice(0, 60); })
+      .then(function () { if (tok === tapRun) tapBusy = false; save(); if (cur === 3) pageTap(false); });
+  }
+
+  // Page 5: background audio. Run starts sub-test a, the next Run b, then c; each keeps its own summary in R.bg.
+  // Log rows while a sub-test runs: [perf ms, event, visibility, audio secs, paused, wall ms]; the log survives a reload.
+  var bgTimer = 0;
+  function logBg(ev) { var l = load(BG_KEY), a = audio; if (!Array.isArray(l)) l = [];
+    l.push([now(), ev, document.visibilityState.charAt(0), a ? Math.round(a.currentTime) : -1, a ? (a.paused ? 1 : 0) : -1, Date.now()]);
+    if (l.length > 400) l.splice(0, l.length - 400); lsSet(BG_KEY, JSON.stringify(l)); }
+  function bgEvent(n) {
+    if (R.bg && R.bg.live) logBg(n);
+    if (n === 'd:visibilitychange' && cur === 4 && document.visibilityState === 'visible') pageBg(false);
+  }
+  ['visibilitychange', 'pagehide', 'pageshow', 'freeze', 'resume', 'blur', 'focus', 'backHome'].forEach(function (n) {
+    window.addEventListener(n, function () { bgEvent(n); }); document.addEventListener(n, function () { bgEvent('d:' + n); }); });
+  // played: audio seconds gained from the row that went hidden to the first visible row after it (or the last
+  // hidden tick, if the page came back reloaded without its audio); hidden: wall-clock seconds of that stretch.
+  function summariseBg() {
+    var l = load(BG_KEY); if (!Array.isArray(l)) l = [];
+    var s = { start: null, played: 0, hidden: 0, ticksHidden: 0, reload: false, n: l.length, events: [] }, hide = null, peak = -1;
+    l.forEach(function (r) {
+      if (r[1] === 'tick') { if (r[2] === 'h') s.ticksHidden++; } else s.events.push(r[1]);
+      if (String(r[1]).indexOf('start:') === 0) s.start = r[1].slice(6);
+      if (r[1] === 'load') s.reload = true;
+      if (r[2] === 'h') { if (!hide) { hide = r; peak = r[3]; } else if (r[3] > peak) peak = r[3]; return; }
+      if (!hide) return;
+      var gain = Math.max(peak, r[3]) - hide[3], secs = Math.round((r[5] - hide[5]) / 1000);
+      if (hide[3] >= 0 && (gain > s.played || (gain === s.played && secs > s.hidden))) { s.played = gain; s.hidden = secs; }
+      hide = null;
+    });
+    s.events = s.events.slice(-6); return s;
+  }
+  function pageBg(run) {
+    var b = R.bg || (R.bg = {});
+    if (run) {
+      if (b.cur) b[b.cur] = summariseBg();   // final summary of the previous sub-test before its log is cleared
+      b.cur = b.cur === 'a' ? 'b' : b.cur === 'b' ? 'c' : 'a'; b.live = true;
+      lsDel(BG_KEY); clearInterval(bgTimer); stopAudio();
+      tryPlay(HTTPS_MP3, 10000).then(function (r) {
+        if (cur !== 4 || !b.live) return;
+        logBg('start:' + r); clearInterval(bgTimer); bgTimer = setInterval(function () { logBg('tick'); }, 1000); });
+    }
+    if (b.cur) b[b.cur] = summariseBg();
+    save();
+    var nextSub = b.cur === 'a' ? 'b' : b.cur === 'b' ? 'c' : 'a';
+    show('5/8 Background', [b.live ? 'Test ' + b.cur + ' running. Now:' : 'Run starts test ' + nextSub + '. Then:',
+      'a) swipe home, wait 30 s, reopen', 'b) let the screen sleep 30 s', 'c) press side once (sleep?), wake',
+      'Then come back to this page.', '', JSON.stringify(R.bg)]);
+  }
+
+  // Page 6: rendering speed. Times the work itself: pixel loop + putImageData (globe), the drawImage batch (tiles).
+  // rAF intervals snap to vsync (16.7, 33.3 ms), so they are kept only as context.
+  var perfBusy = false, perfRun = 0;
+  function pagePerf(run) {
+    if (!run || perfBusy) return show('6/8 Perf', [perfBusy ? 'running...' : 'Tap Run (10 s).', '', JSON.stringify(R.perf || {})]);
+    var tok = ++perfRun; perfBusy = true;
+    var cv = document.createElement('canvas'); cv.width = 240; cv.height = 282;
+    cv.style.cssText = 'position:absolute;left:0;top:0'; page.innerHTML = ''; page.appendChild(cv);
+    var ctx = cv.getContext('2d', { alpha: false }), img = ctx.createImageData(240, 282), buf = new Uint32Array(img.data.buffer);
+    var TW = 2048, TH = 1024, tex = new Uint32Array(TW * TH);   // globe texture size from A.4
+    for (var i = 0; i < tex.length; i++) tex[i] = 0xff000000 | ((i * 2654435761) >>> 8 & 0x3f3f3f);
+    var pix = [], u0 = [], vv = [];
+    for (var y = 0; y < 282; y++) for (var x = 0; x < 240; x++) { var dx = (x - 120) / 108, dy = (141 - y) / 108, q = dx * dx + dy * dy;
+      if (q < 1) { pix.push(y * 240 + x); u0.push(((Math.atan2(dx, Math.sqrt(1 - q)) / Math.PI + 1) * 0.5 * TW) | 0);
+        vv.push(Math.min(TH - 1, ((0.5 - Math.asin(dy) / Math.PI) * TH) | 0)); } }
+    var P = Int32Array.from(pix), U = Int32Array.from(u0), V = Int32Array.from(vv), n = P.length;
+    var tiles = []; for (var t = 0; t < 9; t++) { var tc = document.createElement('canvas'); tc.width = tc.height = 256;
+      var g = tc.getContext('2d'); g.fillStyle = 'hsl(' + t * 40 + ',40%,30%)'; g.fillRect(0, 0, 256, 256); tiles.push(tc); }
+    var spin = [], tile = [], spinRaf = [], tileRaf = [], phase = 0, t0 = performance.now(), last = t0, frame = 0;
+    function loop(ts) {
+      if (tok !== perfRun) return;   // the user left the page: drop this run
+      var dt = ts - last, w = performance.now(); last = ts; frame++;
+      if (phase === 0) { var du = (frame * 3) & (TW - 1); for (var k = 0; k < n; k++) buf[P[k]] = tex[V[k] * TW + ((U[k] + du) & (TW - 1))];
+        ctx.putImageData(img, 0, 0); w = performance.now() - w;
+        if (frame > 2) { spin.push(w); spinRaf.push(dt); } if (ts - t0 > 5000) { phase = 1; t0 = ts; frame = 0; } }
+      else { var off = (frame * 2) % 256; for (var j = 0; j < 9; j++) ctx.drawImage(tiles[j], (j % 3) * 256 * 0.6 - off * 0.6, ((j / 3) | 0) * 256 * 0.6, 154, 154);
+        w = performance.now() - w; if (frame > 2) { tile.push(w); tileRaf.push(dt); } if (ts - t0 > 5000) { finish(); return; } }
+      requestAnimationFrame(loop); }
+    function med(a) { a = a.slice().sort(function (x, y) { return x - y; }); return Math.round(a[a.length >> 1] * 10) / 10; }
+    function p95(a) { a = a.slice().sort(function (x, y) { return x - y; }); return Math.round(a[Math.floor(a.length * 0.95)] * 10) / 10; }
+    function finish() { perfBusy = false;
+      R.perf = { spinWorkMed: med(spin), spinWorkP95: p95(spin), tileWorkMed: med(tile), tileWorkP95: p95(tile),
+        spinRafMed: med(spinRaf), tileRafMed: med(tileRaf) }; save(); pagePerf(false); }
+    requestAnimationFrame(loop);
+  }
+
+  // Page 7: LLM round trip and speech-to-text. The bridge may pass an object or a JSON string; arg records which.
+  window.onPluginMessage = function (raw) {
+    var d = raw, s;
+    if (typeof d === 'string') { try { d = JSON.parse(d); } catch (e) {} }
+    try { s = JSON.stringify(d); } catch (e) {}
+    s = String(s === undefined ? d : s).slice(0, 120);
+    if (d && typeof d === 'object' && d.type === 'sttEnded') R.stt = { arg: typeof raw, transcript: String(d.transcript).slice(0, 80) };
+    else R.llm = { arg: typeof raw, shape: d && typeof d === 'object' ? Object.keys(d).join(',').slice(0, 60) : typeof d, sample: s };
+    save(); if (cur === 6) pageLlm(false);
+  };
+  window.addEventListener('longPressStart', function () { if (cur === 6 && window.CreationVoiceHandler) CreationVoiceHandler.postMessage('start'); });
+  window.addEventListener('longPressEnd', function () { if (cur === 6 && window.CreationVoiceHandler) CreationVoiceHandler.postMessage('stop'); });
+  function pageLlm(run) {
+    if (run && window.PluginMessageHandler) PluginMessageHandler.postMessage(JSON.stringify({
+      message: 'Reply ONLY with this JSON and nothing else: {"ok":true,"city":"Tokyo"}', useLLM: true }));
+    show('7/8 LLM + voice', ['Run sends an LLM request.', 'Hold the side button and say', '"jazz from Brazil", then release.', '',
+      'llm: ' + JSON.stringify(R.llm || null), 'stt: ' + JSON.stringify(R.stt || null)]);
+  }
+
+  // Page 8: results as QR codes (scan each part with your phone) plus the raw text. The JSON is frozen on entry,
+  // escaped to ASCII (\uXXXX, JSON-compatible) and cut into parts of at most 800 chars with a "k/N|" prefix,
+  // so each part fits QR version 20 (97 modules, 210 CSS px at 2 px per module). Run shows the next part.
+  var qrText = '', qrParts = [''], qrK = 0;
+  function ascii(s) { return s.replace(/[\u0080-\uffff]/g, function (c) { return '\\u' + ('000' + c.charCodeAt(0).toString(16)).slice(-4); }); }
+  function split(s) { var n = Math.max(1, Math.ceil(s.length / 790)), size = Math.ceil(s.length / n), out = [];
+    for (var i = 0; i < n; i++) out.push((i + 1) + '/' + n + '|' + s.slice(i * size, (i + 1) * size)); return out; }
+  function pageQr(run) {
+    if (run) qrK = (qrK + 1) % qrParts.length;
+    else { save(); qrText = JSON.stringify(R); qrParts = split(ascii(qrText)); qrK = 0; }
+    page.style.overflowY = 'auto';   // touch-scroll down to the raw text
+    page.innerHTML = '<h1>8/8 Results part ' + (qrK + 1) + '/' + qrParts.length + '</h1>';
+    var room = Math.min(page.clientWidth - 12, page.clientHeight - 12 - page.firstChild.offsetHeight - 4), html = '';
+    try { var q = qrcode(0, 'L'); q.addData(qrParts[qrK]); q.make();
+      var cell = Math.max(2, Math.floor(room / (q.getModuleCount() + 8)));   // at least 2 CSS px (4 device px) per module
+      html += '<div id="qr">' + q.createImgTag(cell, cell * 4) + '</div>';
+    } catch (e) { html += '<pre class="bad">QR failed: ' + esc(e.message) + '</pre>'; }
+    html += '<pre style="font-size:8px">Run: next part. ' + qrText.length + ' chars:\n' + esc(qrText) + '</pre>';
+    page.insertAdjacentHTML('beforeend', html);
+  }
+
+  var pages = [pageEnv, pageBtn, pagePtt, pageTap, pageBg, pagePerf, pageLlm, pageQr];
+  function go(i) {
+    if (cur === 4 && R.bg && R.bg.live) { R.bg[R.bg.cur] = summariseBg(); R.bg.live = false; save(); }   // leaving ends the sub-test
+    if (cur === 2 && pttArmed) { pttArmed = ''; lsDel(PTT_KEY); }   // a tap ends the cold state
+    stopAudio(); clearInterval(bgTimer); tapRun++; tapBusy = false; perfRun++; perfBusy = false;
+    cur = (i + pages.length) % pages.length;
+    page.style.overflowY = ''; page.scrollTop = 0;
+    pages[cur](false);
+  }
+  document.getElementById('prev').addEventListener('click', function () { go(cur - 1); });
+  document.getElementById('next').addEventListener('click', function () { go(cur + 1); });
+  document.getElementById('act').addEventListener('click', function () { if (cur === 2) pttRun(); else pages[cur](true); });
+  if (R.bg && R.bg.live) logBg('load');
+  if (pttFlag()) { pttArmed = 'load'; go(2); } else go(0);
+})();
+</script>
+</body>
+</html>
