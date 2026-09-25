@@ -10,6 +10,7 @@
     "typecheck": "tsc -p .",
     "data": "tsx scripts/build-data.ts",
     "data:live": "tsx scripts/fetch-live-data.ts",
+    "changelog": "tsx scripts/changelog.ts",
     "texture": "node scripts/fetch-texture.mjs",
     "qr": "node scripts/make-qr.mjs",
     "e2e": "playwright test",

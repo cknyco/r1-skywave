@@ -1,3 +1,13 @@
+# Builds and deploys the site on every push to main, nightly at 03:17 UTC and on demand.
+# Three jobs, each with only the permissions it needs:
+#   build      (contents: read)  builds the station data from Radio Browser (falls back to the dataset
+#              already live when that fails), compares it with the previous snapshot on branch data-log
+#              (read-only) to write data/new.json and the change log, builds and tests the app, and
+#              uploads the Pages artifact plus a data-log artifact.
+#   deploy     (pages: write, id-token: write)  publishes the Pages artifact.
+#   changelog  (contents: write)  commits snapshot.json and changes/ to branch data-log (never main);
+#              runs only when the build produced fresh data, not the live fallback. Its nightly pushes
+#              count as repository activity, so GitHub keeps the schedule enabled.
 name: pages
 on:
   push:
@@ -6,15 +16,17 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-  pages: write
-  id-token: write
-concurrency: { group: pages, cancel-in-progress: true }
+concurrency: { group: pages, cancel-in-progress: false }
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment: { name: github-pages, url: '${{ steps.d.outputs.page_url }}' }
+    permissions:
+      contents: read
+    outputs:
+      fresh: ${{ steps.data.outcome }}
     steps:
       - uses: actions/checkout@v7
+      - run: git fetch --depth=1 origin data-log:refs/remotes/origin/data-log || true
       - uses: actions/setup-node@v7
         with: { node-version: 24, cache: npm }
       - run: npm ci
@@ -25,11 +37,91 @@ jobs:
         run: npm run data
         continue-on-error: true
       - if: steps.data.outcome == 'failure'
-        run: npm run data:live
+        run: |
+          echo "::warning::Radio Browser build failed — deploying the last live dataset"
+          npm run data:live
+          curl -fsS --retry 2 https://cknyco.github.io/r1-skywave/data/new.json -o "$RUNNER_TEMP/new.json" \
+            && mv "$RUNNER_TEMP/new.json" public/data/new.json || echo "no live new.json to keep"
+      - if: steps.data.outcome == 'success'
+        run: |
+          mkdir -p log
+          git show origin/data-log:snapshot.json > log/prev-snapshot.json || rm -f log/prev-snapshot.json
+          npm run changelog -- --data public/data --prev log/prev-snapshot.json --log log --date "$(date -u +%F)"
       - run: npm run build
       - run: npm test
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with: { path: dist }
+      - if: steps.data.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with: { name: data-log, path: log, include-hidden-files: false, retention-days: 3 }
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment: { name: github-pages, url: '${{ steps.d.outputs.page_url }}' }
+    steps:
       - id: d
         uses: actions/deploy-pages@v5
+
+  changelog:
+    needs: build
+    if: needs.build.outputs.fresh == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with: { name: data-log, path: log }
+      - name: Commit the change log to branch data-log
+        env:
+          LOG: log
+          REMOTE: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          log=$(cd "$LOG" && pwd)
+          date=$(jq -r .date "$log/changes/latest.json")
+          baseline=$(jq -r .baseline "$log/changes/latest.json")
+          if ! [[ "$date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then echo "::error::unexpected date in latest.json"; exit 1; fi
+          git init -q -b data-log datalog
+          cd datalog
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add origin "$REMOTE"
+          set +e; git ls-remote --exit-code --heads origin data-log > /dev/null; found=$?; set -e
+          if [ "$found" -eq 0 ]; then
+            git fetch -q --depth=1 origin data-log
+            git checkout -q -B data-log FETCH_HEAD
+            if [ "$baseline" = true ] && [ -f snapshot.json ] \
+              && [ "$(jq -r .baseline snapshot.json)" != "$(jq -r .baseline "$log/snapshot.json")" ]; then
+              echo "::error::the build started a new baseline (previous snapshot missing or unreadable), but data-log already has one; not replacing it"
+              exit 1
+            fi
+          elif [ "$found" -eq 2 ]; then
+            cat > README.md <<'EOF'
+          # data-log
+
+          Written by the `pages` workflow after each build with fresh station data; never merged into `main`.
+
+          - `snapshot.json`: every station in the deployed dataset, keyed by Radio Browser uuid, with name, place, country and the date it was first seen.
+          - `changes/YYYY-MM-DD.md`: stations added and removed since the previous run.
+          - `changes/latest.json`: the counts of the latest run.
+
+          The build job reads `snapshot.json` to publish `data/new.json`, the stations first seen in the last 14 days.
+          Station names come from Radio Browser; the Markdown logs escape them.
+          EOF
+          else
+            echo "::error::git ls-remote failed (exit $found)"
+            exit "$found"
+          fi
+          mkdir -p changes
+          cp "$log/snapshot.json" snapshot.json
+          cp "$log"/changes/* changes/
+          git add -A
+          if [ -z "$(git status --porcelain)" ]; then echo "data-log: no changes"; exit 0; fi
+          git commit -q -m "data: station changes $date"
+          git push -q origin data-log
+          echo "data-log: committed station changes $date"
