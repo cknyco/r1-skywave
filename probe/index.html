@@ -41,14 +41,19 @@
   function getAudio() { if (!audio) { audio = new Audio(); audio.preload = 'none'; } return audio; }
   function stopAudio() { if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); } }
 
-  // Resolves with 'playing' | 'error:<code>' | 'timeout' | 'reject:<name>'
+  // Resolves with 'playing' | 'error:<code>' | 'timeout' | 'reject:<name>'. Handlers are private to this call
+  // (its own addEventListener functions, removed only by itself) so a pending earlier call's cleanup cannot
+  // null a newer call's handlers when two calls overlap on the shared Audio element.
   function tryPlay(url, ms) {
     return new Promise(function (resolve) {
       var a = getAudio(), done = false;
-      function fin(v) { if (done) return; done = true; clearTimeout(t); a.onplaying = a.onerror = null; resolve(v); }
+      function onPlaying() { fin('playing'); }
+      function onError() { fin('error:' + (a.error ? a.error.code : '?')); }
+      function fin(v) { if (done) return; done = true; clearTimeout(t);
+        a.removeEventListener('playing', onPlaying); a.removeEventListener('error', onError); resolve(v); }
       var t = setTimeout(function () { fin('timeout'); }, ms);
-      a.onplaying = function () { fin('playing'); };
-      a.onerror = function () { fin('error:' + (a.error ? a.error.code : '?')); };
+      a.addEventListener('playing', onPlaying);
+      a.addEventListener('error', onError);
       a.src = url;
       var p = a.play();
       if (p && p.catch) p.catch(function (e) { fin('reject:' + e.name); });
@@ -177,7 +182,9 @@
 
   // Page 5: background audio. Run starts sub-test a, the next Run b, then c; each keeps its own summary in R.bg.
   // Log rows while a sub-test runs: [perf ms, event, visibility, audio secs, paused, wall ms]; the log survives a reload.
-  var bgTimer = 0;
+  // A Run tap is ignored while the current sub-test's start tryPlay has not settled, and within 3 s of the
+  // previous Run, so a double tap cannot finalise the sub-test that just started with an almost-empty log.
+  var bgTimer = 0, bgBusy = false, bgLastRun = -1e9, bgTok = 0;
   function logBg(ev) { var l = load(BG_KEY), a = audio; if (!Array.isArray(l)) l = [];
     l.push([now(), ev, document.visibilityState.charAt(0), a ? Math.round(a.currentTime) : -1, a ? (a.paused ? 1 : 0) : -1, Date.now()]);
     if (l.length > 400) l.splice(0, l.length - 400); lsSet(BG_KEY, JSON.stringify(l)); }
@@ -206,11 +213,14 @@
   }
   function pageBg(run) {
     var b = R.bg || (R.bg = {});
-    if (run) {
+    if (run && !bgBusy && now() - bgLastRun >= 3000) {
+      bgLastRun = now(); bgBusy = true; var tok = ++bgTok;
       if (b.cur) b[b.cur] = summariseBg();   // final summary of the previous sub-test before its log is cleared
       b.cur = b.cur === 'a' ? 'b' : b.cur === 'b' ? 'c' : 'a'; b.live = true;
       lsDel(BG_KEY); clearInterval(bgTimer); stopAudio();
       tryPlay(HTTPS_MP3, 10000).then(function (r) {
+        if (tok !== bgTok) return;   // this Run was superseded (page left, or another run started)
+        bgBusy = false;
         if (cur !== 4 || !b.live) return;
         logBg('start:' + r); clearInterval(bgTimer); bgTimer = setInterval(function () { logBg('tick'); }, 1000); });
     }
@@ -302,7 +312,7 @@
   function go(i) {
     if (cur === 4 && R.bg && R.bg.live) { R.bg[R.bg.cur] = summariseBg(); R.bg.live = false; save(); }   // leaving ends the sub-test
     if (cur === 2 && pttArmed) { pttArmed = ''; lsDel(PTT_KEY); }   // a tap ends the cold state
-    stopAudio(); clearInterval(bgTimer); tapRun++; tapBusy = false; perfRun++; perfBusy = false;
+    stopAudio(); clearInterval(bgTimer); bgTok++; bgBusy = false; tapRun++; tapBusy = false; perfRun++; perfBusy = false;
     cur = (i + pages.length) % pages.length;
     page.style.overflowY = ''; page.scrollTop = 0;
     pages[cur](false);
