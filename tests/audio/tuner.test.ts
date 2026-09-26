@@ -87,4 +87,106 @@ describe('Tuner', () => {
     expect(t.station).toBeNull();
     expect(played).toEqual([]);
   });
+
+  describe('cancel', () => {
+    it('drops a pending settle before it ever fetches or plays', async () => {
+      const d = deps();
+      const t = new Tuner(d as never, 700);
+      t.select(5);
+      t.cancel();
+      await vi.advanceTimersByTimeAsync(700);
+      await flush();
+      expect(d.played).toEqual([]);
+      expect(t.station).toBeNull();
+    });
+
+    it('stops live playback without forgetting the current station', async () => {
+      const d = deps();
+      const t = new Tuner(d as never, 0);
+      t.select(6);
+      await vi.advanceTimersByTimeAsync(1);
+      await flush();
+      d.player.state = 'playing';
+      t.cancel();
+      expect(d.player.stop).toHaveBeenCalledTimes(1);
+      expect(t.station?.id).toBe('6a');
+    });
+
+    it('does nothing when idle (no timer, no playback)', () => {
+      const d = deps();
+      const t = new Tuner(d as never, 700);
+      expect(() => t.cancel()).not.toThrow();
+      expect(d.player.stop).not.toHaveBeenCalled();
+    });
+
+    it('invalidates an in-flight tune, so a late resolve cannot land after cancel()', async () => {
+      let resolvePlay: (r: 'playing' | 'error') => void = () => {};
+      const played: string[] = [];
+      const player = {
+        state: 'idle' as const,
+        play: vi.fn((url: string) => { played.push(url); return new Promise<'playing' | 'error'>(r => { resolvePlay = r; }); }),
+        stop: vi.fn(),
+      };
+      const stations = async (p: number) => [row(p, `${p}a`)];
+      const t = new Tuner({ player, stations, report: () => {} } as never, 0);
+      t.select(7);
+      await vi.advanceTimersByTimeAsync(1);
+      await flush();                  // stations() has resolved; play() is now pending
+      expect(played).toEqual(['https://s/7a']);
+      t.cancel();
+      resolvePlay('playing');         // the aborted attempt still settles, late
+      await flush();
+      expect(t.station).toBeNull();   // ...but it never lands
+    });
+  });
+
+  describe('resume', () => {
+    it('plays the saved station by id immediately, no settle wait', async () => {
+      const d = deps();
+      const t = new Tuner(d as never, 700);
+      await t.resume(7, '7b');
+      await flush();
+      expect(d.played).toEqual(['https://s/7b']);
+      expect(t.station?.id).toBe('7b');
+      expect(d.reported).toEqual(['7b']);
+    });
+
+    it('falls back to the top station when the saved id is gone', async () => {
+      const d = deps();
+      const t = new Tuner(d as never, 700);
+      await t.resume(8, 'not-there-anymore');
+      await flush();
+      expect(d.played).toEqual(['https://s/8a']);
+      expect(t.station?.id).toBe('8a');
+    });
+
+    it('plays the top station when no id is given', async () => {
+      const d = deps();
+      const t = new Tuner(d as never, 700);
+      await t.resume(9);
+      await flush();
+      expect(t.station?.id).toBe('9a');
+    });
+
+    it('reports a failure like select() does when stations() rejects', async () => {
+      const player = { state: 'idle', play: vi.fn(async () => 'playing' as const), stop: vi.fn() };
+      const stations = vi.fn(async () => { throw new TypeError('offline'); });
+      const failures: string[] = [];
+      const t = new Tuner({ player, stations, report: () => {}, fail: (why: string) => failures.push(why) } as never, 0);
+      await t.resume(2, 'x');
+      expect(failures).toEqual(['offline']);
+      expect(t.station).toBeNull();
+      expect(player.play).not.toHaveBeenCalled();
+    });
+
+    it('cancels a pending settle from select() first', async () => {
+      const d = deps();
+      const t = new Tuner(d as never, 700);
+      t.select(10);
+      await t.resume(11, '11b');
+      await vi.advanceTimersByTimeAsync(700);
+      await flush();
+      expect(d.played).toEqual(['https://s/11b']);   // the settle for place 10 never fires
+    });
+  });
 });

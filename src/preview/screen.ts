@@ -54,6 +54,19 @@ export class PreviewScreen {
     gate.addEventListener('pointerup', () => { gate.hidden = true; fn(); }, { once: true });
   }
 
+  /** Ruling 38: before the tap, offer to resume the station remembered from last time instead of the default label. */
+  setGateLabel(primary: string, stationName?: string): void {
+    const btn = document.getElementById('start');
+    if (!btn) return;
+    btn.textContent = primary;
+    if (!stationName) return;
+    btn.appendChild(document.createElement('br'));
+    const line = document.createElement('span');
+    line.className = 'resume-station';
+    line.textContent = stationName;
+    btn.appendChild(line);
+  }
+
   /** A tap anywhere on the screen (the gate is a sibling, so its tap never lands here). */
   onTap(fn: () => void): void {
     this.root.addEventListener('pointerup', () => fn());

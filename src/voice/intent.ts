@@ -29,6 +29,25 @@ export function parseIntent(msg: PluginMessage): Intent | null {
   return null;
 }
 
+/**
+ * Whether a bridge message answers intentPrompt at all, including a reply of all nulls (the LLM found nothing, which
+ * parseIntent returns as null). A status message such as {"type":"sttStarted"} is not an answer. The voice session
+ * counts answers to tell whose reply is whose, so a real reply it failed to count would eat the next search's reply.
+ */
+export function isIntentReply(msg: PluginMessage): boolean {
+  for (const text of [msg.data, msg.message]) {
+    const m = text?.match(/\{[\s\S]*\}/);
+    if (!m) continue;
+    try {
+      const j: unknown = JSON.parse(m[0]);
+      if (j && typeof j === 'object' && ('place' in j || 'country' in j || 'genre' in j)) return true;
+    } catch {
+      // try the next field
+    }
+  }
+  return false;
+}
+
 const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
 export function findPlace(places: Places, intent: Intent): number {

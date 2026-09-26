@@ -90,6 +90,141 @@ test('voice: hold, transcript, LLM reply jumps to the place and saves it', async
   await expect(page.locator('#preview .place')).toHaveText('São Paulo');
 });
 
+test('Ruling 37: voice search stops the radio before it starts listening', async ({ page }) => {
+  // A fake CreationVoiceHandler, installed before the app's own script runs, plus a patched
+  // HTMLMediaElement.pause() that both push into one array — so the relative order is unambiguous.
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__order = [];
+    const origPause = HTMLMediaElement.prototype.pause;
+    HTMLMediaElement.prototype.pause = function (this: HTMLMediaElement) {
+      w.__order.push('audio:paused');
+      return origPause.call(this);
+    };
+    w.CreationVoiceHandler = { postMessage: (s: string) => { if (s === 'start') w.__order.push('handler:start'); } };
+  });
+  await page.goto('/?place=Berlin');
+  await page.click('#start');
+  // "Tuning…" (connecting) is enough: it already means the player is loading or playing, the two states
+  // cancel() stops — waiting for a fully-live external stream here would make the test hostage to its uptime.
+  await expect(page.locator('#preview .status')).toHaveText(/tuning…|live/, { timeout: 15000 });
+
+  await page.evaluate(() => { (window as any).__order = []; });   // only what longPressStart itself does
+  await page.evaluate(() => window.dispatchEvent(new Event('longPressStart')));
+
+  const order: string[] = await page.evaluate(() => (window as any).__order);
+  expect(order).toEqual(['audio:paused', 'handler:start']);   // stopped, then — only then — voice starts listening
+
+  const audioState = await page.evaluate(() => (window as any).__preview.audio());
+  expect(audioState.paused).toBe(true);
+  expect(audioState.src).toBe('');
+});
+
+test('Ruling 38: the gate offers to resume the exact station remembered from last time', async ({ page }) => {
+  await page.goto('/');
+  const saved = await page.evaluate(async () => {
+    const places = await fetch('data/places.json').then(r => r.json());
+    const idx = places.name.indexOf('Berlin');
+    const cc = places.cc[idx];
+    const st = await fetch(`data/st/${cc}.json`).then(r => r.json());
+    const row = st.rows.find((r: unknown[]) => r[0] === idx && (r[3] as string).startsWith('https://') && !(r[3] as string).includes('radio.garden'));
+    return { place: idx, name: places.name[idx] as string, cc: cc as string, id: row[1] as string, stationName: row[2] as string };
+  });
+  await page.evaluate(
+    s => localStorage.setItem('last', JSON.stringify({ place: s.place, name: s.name, cc: s.cc, id: s.id })),
+    saved,
+  );
+
+  await page.reload();
+  await expect(page.locator('#start')).toContainText('Tap to resume');
+  await expect(page.locator('#start')).toContainText(saved.stationName);
+
+  await page.click('#start');
+  await expect(page.locator('#preview .place')).toHaveText('Berlin');
+  await expect(page.locator('#preview .station')).toHaveText(saved.stationName, { timeout: 15000 });
+});
+
+test('I1: voice resume after a list pick actually plays again (not a parked, silent player)', async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.CreationVoiceHandler = { postMessage: () => {} };
+  });
+  const status = page.locator('#preview .status');
+  const list = page.locator('#preview .list');
+  await page.goto('/?place=Berlin');
+  await page.click('#start');
+  await expect(page.locator('#preview .place')).toHaveText('Berlin');
+
+  await page.click('#preview');
+  await expect(list).toBeVisible();
+  const pickedName = await list.locator('.row.sel').textContent();
+  await page.evaluate(() => window.dispatchEvent(new Event('sideClick')));   // picks the selected row (playPick)
+  await expect(list).toBeHidden();
+  await expect(status).toHaveText('live', { timeout: 15000 });
+  await expect(page.locator('#preview .station')).toHaveText(pickedName ?? '');
+
+  await page.evaluate(() => window.dispatchEvent(new Event('longPressStart')));
+  await expect(status).toHaveText('listening…');
+  await page.evaluate(() => window.dispatchEvent(new Event('longPressEnd')));
+  await page.evaluate(() => (window as any).onPluginMessage({ type: 'sttEnded' }));   // no transcript at all
+
+  await expect(status).toHaveText('live', { timeout: 15000 });   // resumed, not stuck parked/silent
+  await expect(page.locator('#preview .station')).toHaveText(pickedName ?? '');   // the same pick, not the place's top station
+  const audioState = await page.evaluate(() => (window as any).__preview.audio());
+  expect(audioState.paused).toBe(false);
+  expect(audioState.src).not.toBe('');
+});
+
+test('N1: a retry hold never inherits the previous search\'s late reply', async ({ page }) => {
+  test.setTimeout(45000);
+  // Streams are faked (play() resolves, 'playing' fires 30 ms later) and nothing leaves localhost: across a 10s
+  // wait, a real external stream's uptime is the wrong thing for this test to depend on.
+  await page.route(u => !/^(localhost|127\.0\.0\.1)$/.test(u.hostname), r => r.abort());
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__sent = [];
+    HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+      const el = this, src = el.src;
+      if (src) setTimeout(() => { if (el.src === src) el.dispatchEvent(new Event('playing')); }, 30);
+      return Promise.resolve();
+    };
+    w.PluginMessageHandler = { postMessage: (s: string) => w.__sent.push(s) };
+    w.CreationVoiceHandler = { postMessage: (s: string) => w.__sent.push(`voice:${s}`) };
+  });
+  const send = (m: object) => page.evaluate(msg => (window as any).onPluginMessage(msg), m);
+  const press = (e: 'longPressStart' | 'longPressEnd') => page.evaluate(n => window.dispatchEvent(new Event(n)), e);
+  const audio = () => page.evaluate(() => (window as any).__preview.audio() as { paused: boolean; src: string });
+  const status = page.locator('#preview .status');
+  const where = page.locator('#preview .place');
+  await page.goto('/?place=Berlin');
+  await page.click('#start');
+  await expect(status).toHaveText('live');
+  const berlin = (await audio()).src;
+
+  await press('longPressStart');
+  await press('longPressEnd');
+  await send({ type: 'sttEnded', transcript: 'radio from paris' });
+  await expect(status).toHaveText('thinking…');
+  await expect(status).toHaveText('live', { timeout: 12000 });   // no reply within 10s: the same station is back
+  expect((await audio()).src).toBe(berlin);
+
+  await press('longPressStart');                                 // retry, button still held
+  await expect(status).toHaveText('listening…');
+  await send({ message: 'ok', pluginId: 'p', data: '{"place":"Paris","country":"FR","genre":null}' });   // the first search's late reply
+  await page.waitForTimeout(800);
+  await expect(where).toHaveText('Berlin');
+  expect((await audio()).src).toBe('');                          // nothing plays while the mic is open
+  await expect(status).toHaveText('listening…');
+
+  await press('longPressEnd');                                   // the retry's own search still goes through
+  await send({ type: 'sttEnded', transcript: 'jazz from Sao Paulo' });
+  await expect(status).toHaveText('thinking…');
+  await send({ message: 'ok', pluginId: 'p', data: '{"place":"Sao Paulo","country":"BR","genre":"jazz"}' });
+  await expect(where).toHaveText('São Paulo');
+  const asks = await page.evaluate(() => ((window as any).__sent as string[]).filter(s => s.startsWith('{')).length);
+  expect(asks).toBe(2);
+});
+
 test('screenshot for the user', async ({ page }) => {
   const path = process.env.PREVIEW_SCREENSHOT;
   test.skip(!path, 'set PREVIEW_SCREENSHOT=<file.png> to save one');

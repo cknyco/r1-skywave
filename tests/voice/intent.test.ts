@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findPlace, genreSearchUrl, intentPrompt, parseIntent } from '../../src/voice/intent';
+import { findPlace, genreSearchUrl, intentPrompt, isIntentReply, parseIntent } from '../../src/voice/intent';
 import type { Places } from '../../src/data/store';
 
 const places = {
@@ -37,5 +37,13 @@ describe('intent', () => {
 
   it('returns null for a bridge status message, not an empty-fields intent', () => {
     expect(parseIntent({ data: '{"type":"sttStarted"}' })).toBeNull();
+  });
+
+  it('counts an all-null reply as an answer, a status message or plain text not', () => {
+    expect(isIntentReply({ message: 'ok', data: '{"place":null,"country":null,"genre":null}' })).toBe(true);
+    expect(isIntentReply({ message: 'Sure: {"place":"Tokyo","country":null,"genre":null}' })).toBe(true);
+    expect(isIntentReply({ message: 'stt', data: '{"type":"sttStarted"}' })).toBe(false);
+    expect(isIntentReply({ message: 'no json here' })).toBe(false);
+    expect(isIntentReply({ data: '{not json' })).toBe(false);
   });
 });

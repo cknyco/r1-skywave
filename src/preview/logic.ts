@@ -13,7 +13,8 @@ export const NOTE = {
   noData: 'no signal',
 };
 
-export interface Last { place: number; name?: string; cc?: string }
+/** Storage key 'last'. `id` (Ruling 38) is newer than `place`/`name`/`cc` — an older save simply has no `id`. */
+export interface Last { place: number; name?: string; cc?: string; id?: string }
 
 export interface ScreenModel { status: string; place: string; where: string; count: string; station: string; live: boolean }
 
