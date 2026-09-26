@@ -1,10 +1,61 @@
 {
-  "added": 0,
-  "baseline": true,
-  "byCountry": {},
-  "changed": 0,
+  "added": 8,
+  "baseline": false,
+  "byCountry": {
+    "AR": {
+      "added": 2,
+      "changed": 0,
+      "removed": 0
+    },
+    "BE": {
+      "added": 0,
+      "changed": 0,
+      "removed": 1
+    },
+    "CA": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "DE": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "FR": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "KR": {
+      "added": 0,
+      "changed": 0,
+      "removed": 1
+    },
+    "MX": {
+      "added": 1,
+      "changed": 1,
+      "removed": 0
+    },
+    "PL": {
+      "added": 0,
+      "changed": 0,
+      "removed": 1
+    },
+    "RO": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "US": {
+      "added": 1,
+      "changed": 0,
+      "removed": 2
+    }
+  },
+  "changed": 1,
   "date": "2026-09-26",
-  "removed": 0,
-  "total": 7919,
+  "removed": 5,
+  "total": 7922,
   "v": 1
 }
