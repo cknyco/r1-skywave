@@ -3,17 +3,22 @@ import { aggregate, capFamilies } from '../../scripts/lib/places';
 import { Gazetteer, parseGeoNames } from '../../scripts/lib/gazetteer';
 import type { Station } from '../../scripts/lib/normalize';
 
-const st = (id: string, lat: number, lon: number, clicks = 0): Station => ({
+const st = (id: string, lat: number, lon: number, votes = 0): Station => ({
   id, name: id, url: `https://x/${id}`, cc: 'DE', state: '', lat, lon, codec: 'MP3', bitrate: 128,
-  hls: false, clicks, votes: 0, tags: [],
+  hls: false, clicks: 0, votes, tags: [],
 });
 
 describe('aggregate', () => {
-  it('merges stations within 5 km into one place at the most clicked station', () => {
-    const places = aggregate([st('a', 52.52, 13.40, 1), st('b', 52.53, 13.41, 50), st('c', 48.14, 11.58)]);
+  it('merges stations within 5 km into one place at the most voted station', () => {
+    const places = aggregate([{ ...st('a', 52.52, 13.40, 1), clicks: 90 }, st('b', 52.53, 13.41, 50), st('c', 48.14, 11.58)]);
     expect(places).toHaveLength(2);
     expect(places[0].stations.map(s => s.id).sort()).toEqual(['a', 'b']);
     expect(places[0].lat).toBe(52.53);
+  });
+
+  it('anchors a place at a station the previous snapshot had, then by votes, then by id', () => {
+    expect(aggregate([st('a', 52.52, 13.40, 1), st('b', 52.53, 13.41, 50)], new Set(['a']))[0].lat).toBe(52.52);
+    expect(aggregate([st('b', 52.53, 13.41), st('a', 52.52, 13.40)])[0].lat).toBe(52.52);
   });
 
   it('merges across a grid cell border and across the antimeridian', () => {
@@ -25,11 +30,23 @@ describe('aggregate', () => {
     expect(aggregate([st('a', 50.0, 8.0), st('b', 50.18, 8.0)])).toHaveLength(2);
   });
 
-  it('caps one broadcaster at 10 channels per place, keeping the most clicked', () => {
-    const family = Array.from({ length: 15 }, (_, i) => ({ ...st(`n${i}`, 50.3, 11.9, i), url: `https://ch${i}.radionetz.de/live` }));
+  it('caps one broadcaster at 10 channels per place, keeping the most voted, never the most clicked', () => {
+    const family = Array.from({ length: 15 }, (_, i) => ({ ...st(`n${i}`, 50.3, 11.9, i), url: `https://ch${i}.radionetz.de/live`, clicks: 20 - i }));
     const [place] = capFamilies(aggregate([...family, st('x', 50.3, 11.9), st('y', 50.3, 11.9)]));
     expect(place.stations).toHaveLength(12);
-    expect(place.stations.filter(s => s.url.includes('radionetz')).map(s => s.id)).not.toContain('n0');
+    expect(place.stations.filter(s => s.url.includes('radionetz')).map(s => s.id).sort()).toEqual(
+      ['n10', 'n11', 'n12', 'n13', 'n14', 'n5', 'n6', 'n7', 'n8', 'n9'],
+    );
+  });
+
+  it('keeps the channels the previous snapshot had', () => {
+    const family = Array.from({ length: 12 }, (_, i) => ({ ...st(`n${i}`, 50.3, 11.9, i), url: `https://ch${i}.radionetz.de/live` }));
+    const known = new Set(['n0', 'n1']);
+    const ids = capFamilies(aggregate(family, known), known)[0].stations.map(s => s.id);
+    expect(ids).toHaveLength(10);
+    expect(ids).toEqual(expect.arrayContaining(['n0', 'n1']));
+    expect(ids).not.toContain('n2');
+    expect(ids).not.toContain('n3');
   });
 });
 

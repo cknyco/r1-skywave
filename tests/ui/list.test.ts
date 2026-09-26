@@ -14,7 +14,7 @@ describe('ListModel', () => {
     for (let i = 0; i < 6; i++) m.move(1);
     const w = m.window(7);
     expect(w.rows[w.rows.length - 1].id).toBe('s7');
-    expect(m.selected().id).toBe('s6');
+    expect(m.selected()?.id).toBe('s6');
   });
 
   it('clamps at both ends', () => {
@@ -23,6 +23,14 @@ describe('ListModel', () => {
     expect(m.sel).toBe(0);
     for (let i = 0; i < 50; i++) m.move(1);
     expect(m.sel).toBe(11);
+  });
+
+  it('has no selected row when the list is empty', () => {
+    const m = new ListModel([], new Set());
+    m.move(1);
+    expect(m.sel).toBe(0);
+    expect(m.selected()).toBeUndefined();
+    expect(m.window(7)).toEqual({ rows: [], offset: 0 });
   });
 
   it('toggles favourites immutably', () => {

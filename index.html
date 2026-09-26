@@ -7,13 +7,15 @@
 </head>
 <body>
 <div id="app">
-  <canvas id="map" width="240" height="282"></canvas>
+  <canvas id="map"></canvas>
   <div id="ring"></div>
   <div id="status"></div>
+  <div id="attr" hidden></div>
   <div id="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button></div>
-  <div id="strip"></div>
-  <div id="list" hidden></div>
-  <div id="gate"><button id="start">Tap to tune in</button></div>
+  <div id="strip"><div class="name"></div><div class="where"></div></div>
+  <div id="list" hidden><div class="title"></div><div class="rows"></div><div class="hint"></div></div>
+  <div id="about" hidden></div>
+  <div id="gate"><button id="start">Tap to tune in</button><div class="hint"></div></div>
 </div>
 <script src="__APP_JS__"></script>
 </body>

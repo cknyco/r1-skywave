@@ -12,7 +12,8 @@ export class ListModel {
     this.sel = Math.max(0, Math.min(this.rows.length - 1, this.sel + dir));
   }
 
-  selected(): StationRow {
+  /** The selected row; undefined when the list is empty, so every caller has to check. */
+  selected(): StationRow | undefined {
     return this.rows[this.sel];
   }
 

@@ -36,8 +36,17 @@ describe('normalize', () => {
     expect(normalize([{ ...base, url_resolved: 'http://x.org/a' }], { ...opts, allowHttp: true })).toHaveLength(1);
   });
 
-  it('dedupes by stream URL keeping the more clicked row', () => {
-    const rows = [{ ...base, stationuuid: 'a', clickcount: 1 }, { ...base, stationuuid: 'b', clickcount: 9 }];
-    expect(normalize(rows, opts).map(s => s.id)).toEqual(['b']);
+  it('dedupes by stream URL keeping the most voted row, then the smallest uuid, never the most clicked', () => {
+    const rows = [
+      { ...base, stationuuid: 'b', clickcount: 9, votes: 3 },
+      { ...base, stationuuid: 'c', clickcount: 0, votes: 7 },
+      { ...base, stationuuid: 'a', clickcount: 1, votes: 7 },
+    ];
+    expect(normalize(rows, opts).map(s => s.id)).toEqual(['a']);
+  });
+
+  it('keeps the row the previous snapshot had over more votes', () => {
+    const rows = [{ ...base, stationuuid: 'a', votes: 9 }, { ...base, stationuuid: 'b', votes: 0 }];
+    expect(normalize(rows, { ...opts, prefer: new Set(['b']) }).map(s => s.id)).toEqual(['b']);
   });
 });

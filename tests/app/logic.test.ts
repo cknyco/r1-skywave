@@ -3,10 +3,11 @@ import type { PlayerState } from '../../src/audio/player';
 import { Tuner } from '../../src/audio/tuner';
 import type { Places, StationRow } from '../../src/data/store';
 import { ListModel } from '../../src/ui/list';
+import { NEW_HEADER, newList, placeList } from '../../src/ui/news';
 import {
-  HINT, LIST_HINT, NOTE, countryName, lastOf, listView, localTime, msToNextMinute, placeForIntent, playable,
-  screenModel, sharePlayer, startPlace, stationCount, statusText, viewport, whereLine,
-} from '../../src/preview/logic';
+  ABOUT, ABOUT_HINT, ABOUT_TITLE, HINT, LIST_HINT, NOTE, countryName, doubleTap, lastOf, listTitle, listView, localTime,
+  msToNextMinute, placeForIntent, playable, sharePlayer, startPlace, stationCount, statusText, stripModel, viewport, whereLine,
+} from '../../src/app/logic';
 
 const places: Places = {
   v: 't', n: 5,
@@ -106,9 +107,17 @@ describe('text', () => {
   });
 
   it('never mentions the forbidden name in UI text', () => {
-    const all = [...HINT, LIST_HINT, ...Object.values(NOTE), 'tuning…', 'live', 'no signal'];
+    const all = [...HINT, LIST_HINT, ...Object.values(NOTE), ABOUT_TITLE, ...ABOUT, ABOUT_HINT, 'tuning…', 'live', 'no signal'];
     for (const t of all) expect(t.toLowerCase()).not.toContain('garden');
-    expect(HINT.join(' · ')).toBe('wheel: places · side: play/stop · hold: voice · tap: list');
+    expect(HINT.join(' · ')).toBe('wheel: places · side: play/stop · hold: voice · drag: move the map · tap the strip: stations');
+  });
+
+  it('credits every data and imagery source on the About screen (A.8)', () => {
+    const text = ABOUT.join(' ');
+    for (const s of ['Radio Browser (public domain)', 'GeoNames (CC BY 4.0)', 'EOX IT Services GmbH',
+      'Copernicus Sentinel data 2016', 'CC BY 4.0, https://maps.eox.at', "NASA's Global Imagery Browse Services (GIBS)"]) {
+      expect(text).toContain(s);
+    }
   });
 
   it('refreshes the clock on the next minute boundary', () => {
@@ -123,29 +132,35 @@ describe('text', () => {
   });
 });
 
-describe('screen model', () => {
+describe('strip model', () => {
   it('is empty before a place is known', () => {
-    expect(screenModel(places, -1, 'idle', null, '', at))
-      .toEqual({ status: '', place: '', where: '', count: '', station: '', live: false });
+    expect(stripModel(places, -1, 'idle', null, '', at))
+      .toEqual({ status: '', name: '', where: '', live: false, ring: '' });
   });
 
-  it('shows the place and its live station', () => {
-    expect(screenModel(places, 0, 'playing', row('dlf', 0), '', at)).toEqual({
-      status: 'live', place: 'Berlin', where: 'Germany · 14:34', count: '68 stations', station: 'DLF', live: true,
+  it('shows the live station, then place, country and local time', () => {
+    expect(stripModel(places, 0, 'playing', row('dlf', 0), '', at)).toEqual({
+      status: 'live', name: 'DLF', where: 'Berlin · Germany · 14:34', live: true, ring: 'live',
     });
   });
 
-  it('hides a station that belongs to the previous place', () => {
-    const m = screenModel(places, 2, 'loading', row('dlf', 0), '', at);
-    expect([m.status, m.station, m.live]).toEqual(['tuning…', '', false]);
+  it('shows the station count while nothing of this place plays, and a spinning ring while connecting', () => {
+    expect(stripModel(places, 2, 'loading', row('dlf', 0), '', at)).toEqual({
+      status: 'tuning…', name: '50 stations', where: 'Tokyo · Japan · 21:34', live: false, ring: 'tuning',
+    });
+  });
+
+  it('keeps a stopped station on the strip, without the live colour', () => {
+    const m = stripModel(places, 0, 'idle', row('dlf', 0), '', at);
+    expect([m.status, m.name, m.live, m.ring]).toEqual(['', 'DLF', false, '']);
   });
 
   it('lets a note override the player status', () => {
-    expect(screenModel(places, 0, 'playing', null, NOTE.listening, at).status).toBe(NOTE.listening);
+    expect(stripModel(places, 0, 'playing', null, NOTE.listening, at).status).toBe(NOTE.listening);
   });
 });
 
-describe('stations the preview may play', () => {
+describe('stations the app may play', () => {
   it('keeps https streams only and never a radio.garden host', () => {
     const rows = [
       row('ok'),
@@ -163,13 +178,43 @@ describe('list view', () => {
     const rows = Array.from({ length: 12 }, (_, i) => row(`s${i}`));
     const m = new ListModel(rows, new Set(['s9']));
     for (let i = 0; i < 6; i++) m.move(1);
-    const v = listView(m, new Set(['s9']), 'Berlin');
+    const v = listView(m, new Set(['s9']), 'Berlin · 12 stations');
     expect(v.title).toBe('Berlin · 12 stations');
     expect(v.rows).toHaveLength(7);
     expect(v.rows.filter(r => r.sel).map(r => r.i)).toEqual([6]);
-    expect(v.rows[0]).toEqual({ i: 1, name: 'S0', fav: false, sel: false });
-    expect(listView(new ListModel(rows, new Set(['s9'])), new Set(['s9']), 'Berlin').rows[0])
-      .toEqual({ i: 0, name: 'S9', fav: true, sel: true });
+    expect(v.rows[0]).toEqual({ i: 1, name: 'S0', fav: false, sel: false, head: false });
+    expect(listView(new ListModel(rows, new Set(['s9'])), new Set(['s9']), '').rows[0])
+      .toEqual({ i: 0, name: 'S9', fav: true, sel: true, head: false });
+  });
+
+  it('marks the new-stations header row, which is never a favourite', () => {
+    const m = placeList([row('a'), row('b')], new Set(['a']), 3);
+    const v = listView(m, new Set(['a', NEW_HEADER]), '');
+    expect(v.rows.map(r => [r.name, r.head, r.fav])).toEqual([['★ New stations (3)', true, false], ['A', false, true], ['B', false, false]]);
+  });
+
+  it('titles the list with the place and its station count, or the new stations', () => {
+    expect(listTitle(placeList([row('a'), row('b')], new Set(), 3), 'Berlin', false)).toBe('Berlin · 2 stations');
+    expect(listTitle(placeList([row('a')], new Set(), 0), 'Berlin', false)).toBe('Berlin · 1 station');
+    const news = [{ id: 'n', name: 'N', place: 2, placeName: 'Tokyo', cc: 'JP', since: '2026-09-26' }];
+    expect(listTitle(newList(news), 'Berlin', true)).toBe('New stations · 1');
+  });
+});
+
+describe('double tap', () => {
+  it('fires on a second tap within 400 ms and 24 px', () => {
+    const tap = doubleTap();
+    expect(tap(1000, 10, 10)).toBe(false);
+    expect(tap(1300, 20, 14)).toBe(true);
+  });
+
+  it('ignores slow or distant second taps, and starts over after a double tap', () => {
+    const tap = doubleTap();
+    expect(tap(0, 10, 10)).toBe(false);
+    expect(tap(500, 10, 10)).toBe(false);   // too slow: this becomes the first tap
+    expect(tap(700, 60, 10)).toBe(false);   // too far: this becomes the first tap
+    expect(tap(900, 62, 12)).toBe(true);
+    expect(tap(1000, 62, 12)).toBe(false);  // a third tap starts a new pair
   });
 });
 

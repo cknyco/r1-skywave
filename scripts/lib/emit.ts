@@ -64,8 +64,10 @@ export function emit(places: Place[], gazetteer: Gazetteer, v: string) {
 
     const chunk = chunks.get(cc) ?? { v, rows: [] };
     chunks.set(cc, chunk);
+    // Playback order: the most listened first. Clicks change from run to run, which is fine for order;
+    // equal clicks fall back to votes and then the uuid, so the rows never depend on the input order.
     [...p.stations]
-      .sort((a, b) => b.clicks - a.clicks || b.votes - a.votes)
+      .sort((a, b) => b.clicks - a.clicks || b.votes - a.votes || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       .forEach(s => chunk.rows.push([i, s.id, s.name, s.url, s.codec, s.bitrate, s.tags.join(',')]));
   });
   return { placesJson: out, chunks };

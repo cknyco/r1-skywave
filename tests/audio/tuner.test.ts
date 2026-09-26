@@ -188,5 +188,30 @@ describe('Tuner', () => {
       await flush();
       expect(d.played).toEqual(['https://s/11b']);   // the settle for place 10 never fires
     });
+
+    it('plays a station picked from the new-stations list, not the first one the select() settle would', async () => {
+      const d = deps();
+      const t = new Tuner(d as never, 700);
+      t.select(2);                 // what MapView.select → onPick does first
+      await t.resume(2, '2c');
+      await vi.advanceTimersByTimeAsync(700);
+      await flush();
+      expect(d.played).toEqual(['https://s/2c']);
+      expect(t.station?.id).toBe('2c');
+      await t.next();
+      expect(t.station?.id).toBe('2a');
+    });
+
+    it('tries the requested station again even after it failed earlier this session', async () => {
+      const d = deps({ 'https://s/3a': 'error' });
+      const t = new Tuner(d as never, 0);
+      t.select(3);
+      await vi.advanceTimersByTimeAsync(1);
+      await flush();               // 3a failed and is remembered as bad; 3b plays
+      d.played.length = 0;
+      await t.resume(3, '3a');
+      expect(d.played).toEqual(['https://s/3a', 'https://s/3b']);   // asked for 3a: tried first, then the place order
+      expect(t.station?.id).toBe('3b');
+    });
   });
 });

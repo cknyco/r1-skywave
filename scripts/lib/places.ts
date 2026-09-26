@@ -1,5 +1,5 @@
 import { distanceKm } from '../../src/geo/sphere';
-import type { Station } from './normalize';
+import { byIdentity, type Station } from './normalize';
 
 export interface Place {
   lat: number;
@@ -14,8 +14,9 @@ function cellOf(lat: number, lon: number): [number, number] {
   return [Math.floor(lat / CELL), Math.floor((lon + 180) / CELL)];
 }
 
-export function aggregate(stations: Station[], radiusKm = 5): Place[] {
-  const sorted = [...stations].sort((a, b) => b.clicks - a.clicks || b.votes - a.votes);
+/** Greedy clustering: each station joins the first place within radiusKm, taken in byIdentity order (Ruling 39). */
+export function aggregate(stations: Station[], prefer?: ReadonlySet<string>, radiusKm = 5): Place[] {
+  const sorted = [...stations].sort(byIdentity(prefer));
   const grid = new Map<string, Place[]>();
   const places: Place[] = [];
   const reach = (lat: number) => Math.max(1, Math.ceil(radiusKm / (111 * CELL * Math.max(0.05, Math.cos((lat * Math.PI) / 180)))));
@@ -53,13 +54,14 @@ export function domainOf(url: string): string {
   }
 }
 
-/** A broadcaster with dozens of channels at one address would bury everyone else there; keep its most clicked few. */
-export function capFamilies(places: Place[], max = 10): Place[] {
+/** A broadcaster with dozens of channels at one address would bury everyone else there; keep a few, in byIdentity order. */
+export function capFamilies(places: Place[], prefer?: ReadonlySet<string>, max = 10): Place[] {
+  const order = byIdentity(prefer);
   return places
     .map(p => {
       const seen = new Map<string, number>();
       const stations = [...p.stations]
-        .sort((a, b) => b.clicks - a.clicks)
+        .sort(order)
         .filter(s => {
           const d = domainOf(s.url);
           const n = (seen.get(d) ?? 0) + 1;

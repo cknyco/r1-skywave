@@ -1,13 +1,14 @@
 # Builds and deploys the site on every push to main, nightly at 03:17 UTC and on demand.
 # Three jobs, each with only the permissions it needs:
-#   build      (contents: read)  builds the station data from Radio Browser (falls back to the dataset
-#              already live when that fails), compares it with the previous snapshot on branch data-log
-#              (read-only) to write data/new.json and the change log, builds and tests the app, and
-#              uploads the Pages artifact plus a data-log artifact.
+#   build      (contents: read)  reads the previous snapshot and the day base from branch data-log
+#              (read-only), builds the station data from Radio Browser keeping the stations the previous
+#              snapshot had or recently lost (falls back to the dataset already live when that fails),
+#              compares it with the day base to write data/new.json and the change log, builds and tests
+#              the app, and uploads the Pages artifact plus a data-log artifact.
 #   deploy     (pages: write, id-token: write)  publishes the Pages artifact.
-#   changelog  (contents: write)  commits snapshot.json and changes/ to branch data-log (never main);
-#              runs only when the build produced fresh data, not the live fallback. Its nightly pushes
-#              count as repository activity, so GitHub keeps the schedule enabled.
+#   changelog  (contents: write)  commits snapshot.json, day-base.json and changes/ to branch data-log
+#              (never main); runs only when the build produced fresh data, not the live fallback. Its
+#              nightly pushes count as repository activity, so GitHub keeps the schedule enabled.
 name: pages
 on:
   push:
@@ -33,8 +34,14 @@ jobs:
       - run: npm run typecheck
       - uses: actions/cache@v6
         with: { path: .cache, key: geonames-cities15000-v1 }
+      - name: Previous snapshot and day base from branch data-log (read-only; missing on the first run)
+        run: |
+          mkdir -p log
+          git show origin/data-log:snapshot.json > log/prev-snapshot.json || rm -f log/prev-snapshot.json
+          git show origin/data-log:day-base.json > log/prev-day-base.json || rm -f log/prev-day-base.json
       - id: data
         run: npm run data
+        env: { PREV_SNAPSHOT: log/prev-snapshot.json }
         continue-on-error: true
       - if: steps.data.outcome == 'failure'
         run: |
@@ -44,9 +51,8 @@ jobs:
             && mv "$RUNNER_TEMP/new.json" public/data/new.json || echo "no live new.json to keep"
       - if: steps.data.outcome == 'success'
         run: |
-          mkdir -p log
-          git show origin/data-log:snapshot.json > log/prev-snapshot.json || rm -f log/prev-snapshot.json
-          npm run changelog -- --data public/data --prev log/prev-snapshot.json --log log --date "$(date -u +%F)"
+          npm run changelog -- --data public/data --prev log/prev-snapshot.json --day-base log/prev-day-base.json \
+            --log log --date "$(date -u +%F)"
       - run: npm run build
       - run: npm test
       - uses: actions/configure-pages@v6
@@ -95,30 +101,34 @@ jobs:
           if [ "$found" -eq 0 ]; then
             git fetch -q --depth=1 origin data-log
             git checkout -q -B data-log FETCH_HEAD
-            if [ "$baseline" = true ] && [ -f snapshot.json ] \
+            # A v1 snapshot (before Task 8c) is replaced once by the format-upgrade baseline (Ruling 42).
+            if [ "$baseline" = true ] && [ -f snapshot.json ] && [ "$(jq -r .v snapshot.json)" != 1 ] \
               && [ "$(jq -r .baseline snapshot.json)" != "$(jq -r .baseline "$log/snapshot.json")" ]; then
               echo "::error::the build started a new baseline (previous snapshot missing or unreadable), but data-log already has one; not replacing it"
               exit 1
             fi
-          elif [ "$found" -eq 2 ]; then
-            cat > README.md <<'EOF'
+          elif [ "$found" -ne 2 ]; then
+            echo "::error::git ls-remote failed (exit $found)"
+            exit "$found"
+          fi
+          # Exit 2: no branch yet, this run creates it. The README is rewritten on every run so it follows the format.
+          cat > README.md <<'EOF'
           # data-log
 
           Written by the `pages` workflow after each build with fresh station data; never merged into `main`.
 
-          - `snapshot.json`: every station in the deployed dataset, keyed by Radio Browser uuid, with name, place, country and the date it was first seen.
-          - `changes/YYYY-MM-DD.md`: stations added and removed since the previous run.
-          - `changes/latest.json`: the counts of the latest run.
+          - `snapshot.json`: every station in the deployed dataset, keyed by Radio Browser uuid, with name, place, country, the date it was first seen and a short hash of its stream URL.
+          - `day-base.json`: the last snapshot of the previous UTC day.
+          - `changes/YYYY-MM-DD.md`: stations added, removed and changed (the same stream under a new uuid: renamed, moved or re-listed) since the end of the previous day. Later runs on the same day replace it; a day whose changes cancel out has none.
+          - `changes/latest.json`: the counts behind the latest day file.
 
-          The build job reads `snapshot.json` to publish `data/new.json`, the stations first seen in the last 14 days.
+          The build job reads `snapshot.json` to keep each stream on the listing it had before and to publish `data/new.json`, the stations first seen in the last 14 days.
           Station names come from Radio Browser; the Markdown logs escape them.
           EOF
-          else
-            echo "::error::git ls-remote failed (exit $found)"
-            exit "$found"
-          fi
           mkdir -p changes
           cp "$log/snapshot.json" snapshot.json
+          if [ -f "$log/day-base.json" ]; then cp "$log/day-base.json" day-base.json; fi
+          rm -f "changes/$date.md"
           cp "$log"/changes/* changes/
           git add -A
           if [ -z "$(git status --porcelain)" ]; then echo "data-log: no changes"; exit 0; fi

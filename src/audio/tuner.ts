@@ -27,8 +27,11 @@ export class Tuner {
     this.timer = setTimeout(() => { void this.tunePlace(place, token); }, this.settleMs);
   }
 
-  /** Fetches and filters `place`'s stations into `this.list`. Reports failure and returns false when it can't. */
-  private async loadList(place: number, token: number): Promise<boolean> {
+  /**
+   * Fetches `place`'s stations into `this.list`, without those that failed this session unless it is `keep`, the one a
+   * caller asked for by id. Reports failure and returns false when it can't.
+   */
+  private async loadList(place: number, token: number, keep?: string): Promise<boolean> {
     let rows: StationRow[];
     try {
       rows = await this.d.stations(place);
@@ -40,7 +43,7 @@ export class Tuner {
       return false;
     }
     if (token !== this.token) return false;
-    this.list = rows.filter(r => !this.bad.has(r.id));
+    this.list = rows.filter(r => r.id === keep || !this.bad.has(r.id));
     return true;
   }
 
@@ -93,14 +96,16 @@ export class Tuner {
   }
 
   /**
-   * Plays a specific station of `place` right away, no settle wait (Ruling 38's "Tap to resume" and a mid-voice
-   * resume both want this). Falls back to the top station when `stationId` is missing or no longer in the list.
+   * Plays a specific station of `place` right away, no settle wait (Ruling 38's "Tap to resume", a mid-voice resume and
+   * a pick from the new-stations list all want this), and cancels a pending settle, so the select() that MapView.select
+   * triggers does not replace it. Asked for by id, a station is tried even if it failed earlier this session; falls
+   * back to the top station when `stationId` is missing or no longer in the list.
    */
   async resume(place: number, stationId?: string): Promise<void> {
     clearTimeout(this.timer);
     this.place = place;
     const token = ++this.token;
-    if (!(await this.loadList(place, token))) return;
+    if (!(await this.loadList(place, token, stationId))) return;
     const at = stationId ? this.list.findIndex(r => r.id === stationId) : -1;
     this.index = at >= 0 ? at : 0;
     await this.playFrom(token);

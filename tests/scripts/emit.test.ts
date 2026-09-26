@@ -31,6 +31,12 @@ describe('emit', () => {
     expect(chunks.get('DE')!.rows[0]).toEqual([0, 'b', 'R b', 'https://x/b', 'AAC', 96, 'jazz,news']);
   });
 
+  it('orders equal clicks by votes, then by id, whatever the input order', () => {
+    const tie = (id: string, votes: number): Station => ({ ...s(id, 'DE', 3), votes });
+    const place: Place = { lat: 48.13743, lon: 11.57549, stations: [tie('d', 0), tie('b', 2), tie('c', 0), s('a', 'DE', 4)] };
+    expect(emit([place], g, 'v').chunks.get('DE')!.rows.map(r => r[1])).toEqual(['a', 'b', 'c', 'd']);
+  });
+
   it('merges places that resolve to the same city', () => {
     const withSuburb: Place[] = [places[0], { lat: 48.2, lon: 11.6, stations: [s('c2', 'DE', 1)] }, places[1]];
     const { placesJson, chunks } = emit(withSuburb, g, 'v');

@@ -19,12 +19,23 @@ export interface StationRow {
   tags: string[];
 }
 
+/** One entry of data/new.json (Task 8b): a station first seen within the last 14 days. */
+export interface NewStation {
+  id: string;
+  name: string;
+  place: number;
+  placeName: string;
+  cc: string;
+  since: string;
+}
+
 interface PlacesJson { v: string; lat: number[]; lon: number[]; count: number[]; name: string[]; cc: string[]; tzi: number[]; tzs: string[] }
 type Row = [number, string, string, string, string, number, string];
 
 export class DataStore {
   places!: Places;
   private chunks = new Map<string, Promise<StationRow[]>>();
+  private news: Promise<NewStation[]> | null = null;
 
   constructor(private base = 'data/', private fetchFn: typeof fetch = (u, i) => fetch(u, i)) {}
 
@@ -43,6 +54,28 @@ export class DataStore {
   async stationsFor(place: number): Promise<StationRow[]> {
     const rows = await this.chunk(this.places.cc[place]);
     return rows.filter(r => r.place === place);
+  }
+
+  /**
+   * Stations first seen in the last 14 days, newest first. Fetched once; [] when the deploy has no new.json or it is
+   * unreadable; a network failure rejects and the next call tries again.
+   */
+  newStations(): Promise<NewStation[]> {
+    if (!this.news) {
+      const p = this.fetchFn(`${this.base}new.json`)
+        .then(r => {
+          if (r.status === 404) return null;
+          if (!r.ok) throw new Error(`new.json: HTTP ${r.status}`);
+          return r.json().catch(() => null) as Promise<{ stations?: unknown } | null>;
+        })
+        // A places.json cached from an older deploy may not match: keep rows whose place still has that name.
+        .then(j => (Array.isArray(j?.stations) ? (j.stations as NewStation[]) : []).filter(s =>
+          typeof s?.id === 'string' && typeof s.name === 'string' && Number.isInteger(s.place)
+          && s.place >= 0 && s.place < this.places.n && this.places.name[s.place] === s.placeName));
+      p.catch(() => { this.news = null; });
+      this.news = p;
+    }
+    return this.news;
   }
 
   private chunk(cc: string): Promise<StationRow[]> {

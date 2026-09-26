@@ -1,0 +1,45 @@
+/* src/ui/styles.css: the map app (Task 18). main.ts sizes #app from innerWidth × innerHeight (Ruling 19). */
+html, body { margin: 0; overflow: hidden; background: #06080d; color: #f4efe6;
+  font: 12px/1.3 system-ui, -apple-system, Roboto, sans-serif; }
+#app { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+#map { position: absolute; left: 0; top: 0; touch-action: none; }
+#ring { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; box-sizing: border-box;
+  border: 1.5px solid rgba(255, 255, 255, .9); border-radius: 50%; pointer-events: none; transition: border-color .3s; }
+#ring.tuning { border-style: dashed; animation: spin 2s linear infinite; }
+#ring.live { border-color: #E8A33D; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#status { position: absolute; left: 0; top: 0; min-width: 72px; height: 26px; padding: 6px 8px; box-sizing: border-box;
+  font-size: 10px; line-height: 14px; letter-spacing: .08em; text-transform: uppercase; opacity: .85;
+  white-space: nowrap; text-shadow: 0 0 3px #000; }
+#attr { position: absolute; right: 4px; top: 3px; font-size: 8px; line-height: 10px; opacity: .75; pointer-events: none;
+  white-space: nowrap; text-shadow: 0 0 2px #000; }
+#zoom { position: absolute; right: 6px; top: 70px; display: flex; flex-direction: column; gap: 6px; }
+#zoom button { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: rgba(0, 0, 0, .55);
+  color: #fff; font: 18px/30px system-ui, -apple-system, Roboto, sans-serif; }
+#strip { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; padding: 9px 10px 0; box-sizing: border-box;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .85) 35%); }
+#strip .name { font-size: 15px; line-height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#strip .name.live { color: #E8A33D; }
+#strip .where { font-size: 11px; line-height: 15px; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#list { position: absolute; left: 0; right: 0; top: 0; bottom: 52px; display: flex; flex-direction: column; background: #06080d; }
+#list[hidden], #about[hidden], #gate[hidden] { display: none; }
+#list .title { flex: none; height: 20px; line-height: 20px; padding: 0 12px; font-size: 11px; opacity: .7;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#list .rows { flex: 1; min-height: 0; overflow: hidden; }
+#list .row { height: 28px; line-height: 28px; padding: 0 12px; font-size: 14px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+#list .row.head { color: #E8A33D; }
+#list .row.sel { background: #E8A33D; color: #111; }
+#list .hint { flex: none; padding: 0 10px 6px; font-size: 10px; line-height: 14px; opacity: .5; text-align: center; white-space: nowrap; }
+#about { position: absolute; inset: 0; padding: 10px 12px; box-sizing: border-box; background: #06080d; overflow-y: auto;
+  font-size: 9.5px; line-height: 1.35; }
+#about .title { margin-bottom: 6px; font-size: 13px; font-weight: 600; }
+#about p { margin: 0 0 5px; opacity: .85; overflow-wrap: anywhere; }
+#about .hint { opacity: .5; }
+#gate { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 16px; background: #06080d; }
+#start { padding: 12px 18px; border-radius: 22px; border: 1.5px solid #E8A33D; background: transparent; color: #f4efe6;
+  font: inherit; font-size: 14px; text-align: center; max-width: 200px; }
+#start .resume-station { display: inline-block; margin-top: 4px; max-width: 190px; font-size: 11px; opacity: .75;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#gate .hint { font-size: 10px; line-height: 14px; opacity: .5; text-align: center; white-space: nowrap; }
