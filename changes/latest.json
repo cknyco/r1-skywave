@@ -1,34 +1,142 @@
 {
-  "added": 7,
+  "added": 134,
   "baseline": false,
   "byCountry": {
-    "CH": {
+    "AR": {
       "added": 1,
-      "removed": 0
+      "removed": 2
     },
-    "CO": {
+    "AT": {
       "added": 1,
-      "removed": 0
+      "removed": 2
     },
-    "ES": {
-      "added": 0,
+    "AU": {
+      "added": 1,
       "removed": 1
     },
-    "MX": {
+    "BA": {
       "added": 1,
-      "removed": 0
+      "removed": 1
     },
-    "SE": {
+    "BE": {
+      "added": 1,
+      "removed": 1
+    },
+    "BH": {
+      "added": 1,
+      "removed": 1
+    },
+    "BR": {
+      "added": 5,
+      "removed": 4
+    },
+    "CA": {
+      "added": 4,
+      "removed": 4
+    },
+    "CL": {
+      "added": 1,
+      "removed": 1
+    },
+    "CO": {
       "added": 3,
       "removed": 3
     },
-    "US": {
+    "CR": {
+      "added": 1,
+      "removed": 1
+    },
+    "DE": {
+      "added": 15,
+      "removed": 15
+    },
+    "ES": {
+      "added": 2,
+      "removed": 2
+    },
+    "FR": {
+      "added": 6,
+      "removed": 6
+    },
+    "GB": {
+      "added": 4,
+      "removed": 2
+    },
+    "GH": {
       "added": 1,
       "removed": 0
+    },
+    "GR": {
+      "added": 3,
+      "removed": 1
+    },
+    "ID": {
+      "added": 1,
+      "removed": 3
+    },
+    "IT": {
+      "added": 3,
+      "removed": 0
+    },
+    "JO": {
+      "added": 0,
+      "removed": 1
+    },
+    "KE": {
+      "added": 1,
+      "removed": 1
+    },
+    "MX": {
+      "added": 37,
+      "removed": 39
+    },
+    "NL": {
+      "added": 2,
+      "removed": 3
+    },
+    "NO": {
+      "added": 1,
+      "removed": 1
+    },
+    "PK": {
+      "added": 1,
+      "removed": 1
+    },
+    "PL": {
+      "added": 4,
+      "removed": 1
+    },
+    "PT": {
+      "added": 3,
+      "removed": 3
+    },
+    "RO": {
+      "added": 6,
+      "removed": 6
+    },
+    "RU": {
+      "added": 5,
+      "removed": 5
+    },
+    "SE": {
+      "added": 6,
+      "removed": 6
+    },
+    "UA": {
+      "added": 0,
+      "removed": 2
+    },
+    "US": {
+      "added": 12,
+      "removed": 18
+    },
+    "ZA": {
+      "added": 1,
+      "removed": 1
     }
   },
   "date": "2026-09-26",
-  "removed": 4,
-  "total": 7920,
+  "removed": 138,
+  "total": 7916,
   "v": 1
 }
