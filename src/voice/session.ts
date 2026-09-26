@@ -28,6 +28,22 @@
 // forgiving session's own slow reply unowned, and the next search took it as its own. What is left:
 // a timed-out session's reply that arrives after all, and a later session's own reply that also
 // takes over 10s, can still land one session off.
+//
+// Task P3 (Ruling 44): the LLM on the user's r1 (rabbitOS 3, his own model keys) may take well over
+// 10s, and the preview, which never gave up, did find places. Once asked() has gone out, the clock
+// allows ASK_MS (25s); the 10s clock still guards the wait for sttEnded after release().
+//
+// Task P3, fix round 1 (I1): a reply in prose that names no place may be the LLM's answer ("Sorry, I can't find
+// that") or a message that is no answer at all, so prose() never settles a session. It is still attributed like a
+// reply: an ended session that is owed one takes it (FIFO), else the live session notes it and keeps waiting, so a
+// JSON reply that follows within 25s is accepted. A session that saw prose forgives that many replies when it ends,
+// instead of leaving debt that would discard the next search's answer.
+//
+// Task P3, fix round 2 (N1): that holds however the session ends: its timeout, a retry hold or abandon(). Round 3 keeps
+// a cut-short session's reply owed because that reply is still on the way; prose already came, to this session, while it
+// was owed one, so it was most likely that reply. Eaten discards (`ate`) still count only at a timeout. The cost: if the
+// prose was a status line and the JSON only arrives after a retry has asked, the retry takes it, which is usually the
+// same request; if it arrives after a timeout, the next search takes it, like round 3's late reply.
 
 export interface VoiceSessionDeps {
   /** Whether audio was actually playing (or still connecting) right now, read at start(). */
@@ -38,21 +54,25 @@ export interface VoiceSessionDeps {
   resume(): void;
   /** Runs once whenever the session ends, resumed or not — the caller's cue to clear its "listening…"/"thinking…" note. */
   onSettle?(): void;
+  /** The clock ran out (no sttEnded, or no reply to asked()); runs before the resume. The voice log records it (Ruling 44). */
+  onTimeout?(waitedMs: number): void;
 }
 
 /** What answer() did with an LLM reply. */
 export type Answer = 'accepted' | 'stale' | 'ignored';
+/** What prose() did with a reply that names no place: an ended session's, noted by the live session, or nobody's. */
+export type Prose = 'stale' | 'waiting' | 'ignored';
 
 export interface VoiceSession {
   /** longPressStart: records whether audio was playing, stops it, opens the mic. Expects one sttEnded. Arms nothing. */
   start(): void;
-  /** longPressEnd: the mic is closed. Applies an outcome that landed while it was open, or else arms the 10s clock. */
+  /** longPressEnd: the mic is closed. Applies an outcome that landed while it was open, or else arms the clock (25s once asked, else 10s). */
   release(): void;
   /** Voice never started (startVoice() returned false): no sttEnded is coming; ends the session right away, same as a "not found". */
   end(): boolean;
   /** An sttEnded arrived. True only when it is the live session's own; false for an earlier session's (or an unexpected one). */
   transcript(): boolean;
-  /** askLLM() went out for the live session: one reply is now owed. Restarts the 10s clock unless the mic is still open. */
+  /** askLLM() went out for the live session: one reply is now owed. Restarts the clock with 25s unless the mic is still open. */
   asked(): void;
   /**
    * An LLM reply arrived. 'stale' when it answers an earlier session's request (discarded, changes nothing); 'accepted'
@@ -60,6 +80,12 @@ export interface VoiceSession {
    * 'ignored' when nothing is owed a reply at all.
    */
   answer(found: boolean, jump?: () => void): Answer;
+  /**
+   * A reply arrived in prose that names no place (fix round 1, I1). 'stale' when an ended session was owed a reply
+   * (it takes this one); 'waiting' when the live session is owed one: it keeps waiting, and when it ends (timeout, retry
+   * or abandon(), fix round 2) forgives the reply this may have been; 'ignored' when nothing is owed. Never settles a session.
+   */
+  prose(): Prose;
   /**
    * The live session reached an outcome without an LLM reply (no transcript, or askLLM() failed), or a caller settles it
    * directly. Not found + had been playing = resume; found runs `jump` instead. Held back until release() while the mic is
@@ -72,11 +98,14 @@ export interface VoiceSession {
   isLive(): boolean;
 }
 
-const TIMEOUT_MS = 10000;
+/** How long a released session waits for its sttEnded. */
+export const TIMEOUT_MS = 10000;
+/** How long a session waits for the LLM's reply once asked() has gone out (Ruling 44). */
+export const ASK_MS = 25000;
 
 type Kind = 'stt' | 'reply';
 
-export function createVoiceSession(d: VoiceSessionDeps, timeoutMs = TIMEOUT_MS): VoiceSession {
+export function createVoiceSession(d: VoiceSessionDeps, timeoutMs = TIMEOUT_MS, askMs = ASK_MS): VoiceSession {
   let live = false;
   let listening = false;   // the live session's mic is open
   let wasPlaying = false;
@@ -87,6 +116,7 @@ export function createVoiceSession(d: VoiceSessionDeps, timeoutMs = TIMEOUT_MS):
   // the session that owed it timed out (true) or was cut short by a retry, abandon() or an outcome (false).
   const stale: Record<Kind, boolean[]> = { stt: [], reply: [] };
   const ate = { stt: 0, reply: 0 };     // self-heal: discards the live session may have lost its own message to
+  let prosed = 0;                       // replies in prose the live session saw while owed one (I1)
 
   function clearTimer() {
     if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
@@ -99,11 +129,15 @@ export function createVoiceSession(d: VoiceSessionDeps, timeoutMs = TIMEOUT_MS):
     held = null;
     clearTimer();
     for (const k of ['stt', 'reply'] as const) {
-      const forgiven = timedOut ? Math.min(owed[k], ate[k]) : 0;
+      // Messages that may have been this session's own: an eaten discard only after a timeout (round 3), the prose it
+      // saw however it ended (P3 fix round 2, N1).
+      const maybeOwn = (timedOut ? ate[k] : 0) + (k === 'reply' ? prosed : 0);
+      const forgiven = Math.min(owed[k], maybeOwn);
       for (let i = forgiven; i < owed[k]; i++) stale[k].push(timedOut);
       owed[k] = 0;
       ate[k] = 0;
     }
+    prosed = 0;
     if (jump) jump(); else if (resume) d.resume();
     d.onSettle?.();
     return true;
@@ -111,7 +145,8 @@ export function createVoiceSession(d: VoiceSessionDeps, timeoutMs = TIMEOUT_MS):
 
   function arm() {
     clearTimer();
-    timer = setTimeout(() => finish(wasPlaying, undefined, true), timeoutMs);
+    const ms = owed.reply > 0 ? askMs : timeoutMs;
+    timer = setTimeout(() => { d.onTimeout?.(ms); finish(wasPlaying, undefined, true); }, ms);
   }
 
   function settle(found: boolean, jump?: () => void): boolean {
@@ -148,7 +183,7 @@ export function createVoiceSession(d: VoiceSessionDeps, timeoutMs = TIMEOUT_MS):
       if (!live || !listening) return;
       listening = false;
       if (held) { const o = held; finish(o.resume, o.jump); return; }
-      arm();   // fallback clock, in case sttEnded never arrives
+      arm();   // fallback clock, in case sttEnded (or, if asked mid-hold, the reply) never arrives
     },
     end() {
       if (!live) return false;
@@ -161,13 +196,19 @@ export function createVoiceSession(d: VoiceSessionDeps, timeoutMs = TIMEOUT_MS):
     asked() {
       if (!live) return;
       owed.reply++;
-      if (!listening) arm();   // a fresh 10s for the reply; while the mic is open, release() arms it
+      if (!listening) arm();   // a fresh 25s for the reply; while the mic is open, release() arms it
     },
     answer(found, jump) {
       const whose = arrive('reply');
       if (whose === 'stale') return 'stale';
       if (whose === 'none') return 'ignored';
       return settle(found, jump) ? 'accepted' : 'ignored';
+    },
+    prose() {
+      if (stale.reply.length > 0) { arrive('reply'); return 'stale'; }   // an ended session's answer, as answer() would
+      if (!live || owed.reply === 0) return 'ignored';
+      prosed++;   // owed stays as it is: a JSON reply may still follow
+      return 'waiting';
     },
     resolved(found, jump) {
       return settle(found, jump);

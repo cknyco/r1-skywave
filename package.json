@@ -12,6 +12,7 @@
     "data:live": "tsx scripts/fetch-live-data.ts",
     "changelog": "tsx scripts/changelog.ts",
     "texture": "node scripts/fetch-texture.mjs",
+    "cities": "tsx scripts/make-cities.ts",
     "qr": "node scripts/make-qr.mjs",
     "e2e": "playwright test",
     "budgets": "node scripts/check-budgets.mjs"

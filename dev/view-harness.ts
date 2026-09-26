@@ -5,7 +5,7 @@ import { DataStore } from '../src/data/store';
 import { Globe, loadTexture } from '../src/map/globe';
 import { minCountForZoom } from '../src/map/lod';
 import { TILE_SOURCE } from '../src/map/tile-source';
-import { TileLayer } from '../src/map/tiles';
+import { mercatorBase, TileLayer } from '../src/map/tiles';
 import { MapView, viewSize } from '../src/map/view';
 import { buildWalk, stepWalk } from '../src/map/walk';
 
@@ -21,6 +21,7 @@ async function boot(): Promise<void> {
   const globe = new Globe(texture.tex, texture.TW, texture.TH, w, h);
   let view!: MapView;
   const tiles = new TileLayer(TILE_SOURCE, () => view.wake());
+  tiles.base = mercatorBase(texture.tex, texture.TW, texture.TH);   // as in the app (Ruling 46)
   view = new MapView(canvas, places, globe, tiles, p => { hud.textContent = `${places.name[p]} · ${places.count[p]}`; });
 
   const q = new URLSearchParams(location.search);

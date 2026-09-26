@@ -58,7 +58,9 @@ describe('DataStore', () => {
     }) as typeof fetch;
     const store = new DataStore('data/', f);
     await store.load();
+    expect(store.newsDate).toBe('');
     expect((await store.newStations()).map(s => s.id)).toEqual(['n1']);
+    expect(store.newsDate).toBe('2026-09-26');   // Ruling 45: the empty list names the date of the data
     await store.newStations();
     expect(calls.filter(u => u.endsWith('new.json'))).toHaveLength(1);
   });
@@ -67,6 +69,17 @@ describe('DataStore', () => {
     const store = new DataStore('data/', fakeFetch([]));
     await store.load();
     expect(await store.newStations()).toEqual([]);
+    expect(store.newsDate).toBe('');
+  });
+
+  it('Ruling 47: hands each country chunk to onRows once, as it loads; a failing listener loses nothing', async () => {
+    const store = new DataStore('data/', fakeFetch([]));
+    await store.load();
+    const seen: string[][] = [];
+    store.onRows = rows => { seen.push(rows.map(r => r.id)); throw new Error('listener'); };
+    expect((await store.stationsFor(0)).map(s => s.id)).toEqual(['a', 'b']);
+    await store.stationsFor(1);
+    expect(seen).toEqual([['a', 'b', 'c']]);   // the whole chunk, not one place's rows; the cached chunk is not handed over again
   });
 
   it('treats an unreadable new.json as no new stations', async () => {

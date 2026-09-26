@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ListModel, toggleFav } from '../../src/ui/list';
+import { ListModel } from '../../src/ui/list';
 
 const rows = Array.from({ length: 12 }, (_, i) => ({ place: 0, id: `s${i}`, name: `S${i}`, url: '', codec: '', bitrate: 0, tags: [] }));
 
@@ -31,12 +31,5 @@ describe('ListModel', () => {
     expect(m.sel).toBe(0);
     expect(m.selected()).toBeUndefined();
     expect(m.window(7)).toEqual({ rows: [], offset: 0 });
-  });
-
-  it('toggles favourites immutably', () => {
-    const a = new Set(['x']);
-    expect([...toggleFav(a, 'y')].sort()).toEqual(['x', 'y']);
-    expect([...toggleFav(a, 'x')]).toEqual([]);
-    expect([...a]).toEqual(['x']);
   });
 });

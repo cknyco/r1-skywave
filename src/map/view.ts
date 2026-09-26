@@ -1,4 +1,4 @@
-import { DOT_CSS, GLOBE_BELOW_ZOOM, RING_RADIUS, ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN } from '../config';
+import { DOT_CSS, GLOBE_BELOW_ZOOM, LANDING_PREFETCH, RING_RADIUS, ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN } from '../config';
 import type { Places } from '../data/store';
 import { type Cam, project, screenOf, unproject, worldSize } from '../geo/mercator';
 import { wrapLon } from '../geo/sphere';
@@ -19,8 +19,8 @@ export class MapView {
   current = -1;
   dots: ScreenDot[] = [];
   moving = false;
-  readonly w: number;
-  readonly h: number;
+  w = 0;
+  h = 0;
   readonly dpr: number;   // canvas backing store = CSS size × dpr
   frameMs: number[] = [];
   frameGlobe: boolean[] = [];   // parallel to frameMs: true where the globe renderer drew that frame
@@ -30,9 +30,9 @@ export class MapView {
   private raf = 0;
   private ctx: CanvasRenderingContext2D;
   private off: HTMLCanvasElement;   // the 1x globe buffer, upscaled onto the canvas with drawImage
-  private offCtx: CanvasRenderingContext2D;
-  private img: ImageData;
-  private buf: Uint32Array;
+  private offCtx!: CanvasRenderingContext2D;
+  private img!: ImageData;
+  private buf!: Uint32Array;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -41,29 +41,47 @@ export class MapView {
     private tiles: TileLayer,
     private onPick: (place: number) => void,
   ) {
+    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.ctx = canvas.getContext('2d', { alpha: false })!;
+    this.off = document.createElement('canvas');
     const { w, h } = viewSize(canvas);
+    this.resize(w, h);
+  }
+
+  /**
+   * Sizes the canvas, the globe and its buffer to a w×h CSS-pixel view and redraws. The app calls it again when the
+   * WebView reports another size after boot (M3 minor: the r1 may settle its innerHeight late).
+   */
+  resize(w: number, h: number): void {
+    if (w === this.w && h === this.h) return;
     this.w = w;
     this.h = h;
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = Math.round(w * this.dpr);
-    canvas.height = Math.round(h * this.dpr);
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
-    this.ctx = canvas.getContext('2d', { alpha: false })!;
-    globe.resize(w, h);
-    this.off = document.createElement('canvas');
+    this.canvas.width = Math.round(w * this.dpr);
+    this.canvas.height = Math.round(h * this.dpr);
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${h}px`;
+    this.globe.resize(w, h);
     this.off.width = w;
     this.off.height = h;
     this.offCtx = this.off.getContext('2d')!;
     this.img = this.offCtx.createImageData(w, h);
     this.buf = new Uint32Array(this.img.data.buffer);
+    this.wake();
   }
 
   wake = (): void => { if (!this.raf) this.raf = requestAnimationFrame(this.frame); };
 
+  /** The zoom the map is at, or flying to: a far flight dips far below both ends on the way (M3 minor M1). */
+  get targetZ(): number {
+    return this.flight ? this.flight.to.z : this.cam.z;
+  }
+
+  /** Flies to lon/lat at zoom z; a landing in tile mode requests its tiles right away (Ruling 46). */
   flyTo(lon: number, lat: number, z = this.cam.z): void {
-    this.flight = planFlight(this.cam, { lon, lat, z: Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)) }, performance.now());
+    const to = { lon, lat, z: Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)) };
+    this.flight = planFlight(this.cam, to, performance.now());
     this.moving = true;
+    if (to.z >= GLOBE_BELOW_ZOOM) this.tiles.prefetch(to, this.w, this.h, this.dpr, LANDING_PREFETCH);
     this.wake();
   }
 

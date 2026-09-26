@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createVoiceSession, type VoiceSessionDeps } from '../../src/voice/session';
+import { ASK_MS, createVoiceSession, TIMEOUT_MS, type VoiceSessionDeps } from '../../src/voice/session';
 
 // `stop()` flips the mock's own "on" flag, so a later isPlaying() read genuinely reflects that the
 // player was silenced — needed to exercise I4's carry-over fix, where a retry's isPlaying() would
@@ -82,18 +82,96 @@ describe('voice session', () => {
     expect(resume).toHaveBeenCalledTimes(1);
   });
 
-  it('asked() after release restarts the clock: a fresh 10s for the reply', async () => {
+  it('asked() after release restarts the clock: a fresh 25s for the reply', async () => {
     const { d, resume } = deps(true);
     const s = createVoiceSession(d);
     s.start();
-    s.release();                                // fallback armed
+    s.release();                                // fallback armed (10s, waiting for sttEnded)
     await vi.advanceTimersByTimeAsync(6000);
     expect(s.transcript()).toBe(true);
-    s.asked();                                  // restart the countdown
-    await vi.advanceTimersByTimeAsync(6000);    // 12s since release, only 6s since the ask
+    s.asked();                                  // restart the countdown with ASK_MS
+    await vi.advanceTimersByTimeAsync(ASK_MS - 1);
     expect(resume).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(4000);
+    await vi.advanceTimersByTimeAsync(1);
     expect(resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('Ruling 44: onTimeout reports which clock ran out, before the resume', async () => {
+    const { d } = deps(true);
+    const order: string[] = [];
+    const s = createVoiceSession({ ...d, resume: () => { order.push('resume'); d.resume(); }, onTimeout: ms => order.push(`timeout ${ms}`) });
+    s.start();
+    s.release();
+    expect(s.transcript()).toBe(true);           // a transcript, but nothing asked: the 10s clock keeps running
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS);
+    expect(order).toEqual([`timeout ${TIMEOUT_MS}`, 'resume']);
+    ask(s);
+    await vi.advanceTimersByTimeAsync(ASK_MS);
+    expect(order.slice(2)).toEqual([`timeout ${ASK_MS}`, 'resume']);
+    s.start();
+    s.release();
+    expect(s.resolved(false)).toBe(true);        // an outcome in time is no timeout
+    await vi.advanceTimersByTimeAsync(ASK_MS);
+    expect(order).toHaveLength(5);
+  });
+
+  it('Ruling 44: the LLM gets 25s, the wait for sttEnded stays 10s', () => {
+    expect(TIMEOUT_MS).toBe(10000);
+    expect(ASK_MS).toBe(25000);
+  });
+
+  it('Ruling 44: a slow reply at 20s is still accepted and jumps', async () => {
+    const { d, resume } = deps(true);
+    const jump = vi.fn();
+    const s = createVoiceSession(d);
+    ask(s);
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(s.isLive()).toBe(true);
+    expect(s.answer(true, jump)).toBe('accepted');
+    expect(jump).toHaveBeenCalledTimes(1);
+    expect(resume).not.toHaveBeenCalled();
+  });
+
+  it('Ruling 44: no reply within 25s resumes; the reply that comes later is stale and changes nothing', async () => {
+    const { d, resume, onSettle } = deps(true);
+    const jump = vi.fn();
+    const s = createVoiceSession(d);
+    ask(s);
+    await vi.advanceTimersByTimeAsync(ASK_MS);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(onSettle).toHaveBeenCalledTimes(1);
+    expect(s.isLive()).toBe(false);
+    expect(s.answer(true, jump)).toBe('stale');
+    expect(jump).not.toHaveBeenCalled();
+    expect(resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('Ruling 44: asked() during the hold makes release() arm 25s, not 10s', async () => {
+    const { d, resume } = deps(true);
+    const s = createVoiceSession(d);
+    s.start();
+    expect(s.transcript()).toBe(true);
+    s.asked();
+    s.release();
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS);
+    expect(resume).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(ASK_MS - TIMEOUT_MS);
+    expect(resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('Ruling 44: a found fast-path outcome (no LLM) ends the session at once, never resumes, owes nothing', async () => {
+    const { d, resume } = deps(true);
+    const jump = vi.fn();
+    const s = createVoiceSession(d);
+    s.start();
+    s.release();
+    expect(s.transcript()).toBe(true);
+    expect(s.resolved(true, jump)).toBe(true);
+    expect(jump).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(ASK_MS);
+    expect(resume).not.toHaveBeenCalled();
+    ask(s);                                     // the next search takes its own reply
+    expect(s.answer(false)).toBe('accepted');
   });
 
   it('voice unavailable resumes immediately, without waiting for the timeout', () => {
@@ -202,7 +280,7 @@ describe('voice session', () => {
       expect(jump).toHaveBeenCalledTimes(1);
     });
 
-    it('asked() while the mic is open arms no clock; release() does', async () => {
+    it('asked() while the mic is open arms no clock; release() does (25s)', async () => {
       const { d, resume } = deps(true);
       const s = createVoiceSession(d);
       s.start();
@@ -211,7 +289,7 @@ describe('voice session', () => {
       await vi.advanceTimersByTimeAsync(15000);   // still holding
       expect(resume).not.toHaveBeenCalled();
       s.release();
-      await vi.advanceTimersByTimeAsync(10000);
+      await vi.advanceTimersByTimeAsync(ASK_MS);
       expect(resume).toHaveBeenCalledTimes(1);
     });
 
@@ -234,7 +312,7 @@ describe('voice session', () => {
       const jump = vi.fn();
       const s = createVoiceSession(d);
       ask(s);
-      await vi.advanceTimersByTimeAsync(10000);
+      await vi.advanceTimersByTimeAsync(ASK_MS);
       expect(resume).toHaveBeenCalledTimes(1);   // session 1 timed out and put the radio back
       s.start();                                  // retry hold
       expect(stop).toHaveBeenCalledTimes(2);
@@ -248,7 +326,7 @@ describe('voice session', () => {
       const { d, resume } = deps(true);
       const s = createVoiceSession(d);
       ask(s);
-      await vi.advanceTimersByTimeAsync(10000);
+      await vi.advanceTimersByTimeAsync(ASK_MS);
       s.start();
       expect(s.answer(false)).toBe('stale');
       expect(resume).toHaveBeenCalledTimes(1);   // only session 1's own timeout resume
@@ -261,7 +339,7 @@ describe('voice session', () => {
       const jump = vi.fn();
       const s = createVoiceSession(d);
       ask(s);
-      await vi.advanceTimersByTimeAsync(10000);
+      await vi.advanceTimersByTimeAsync(ASK_MS);
       s.start();
       expect(s.answer(true, vi.fn())).toBe('stale');
       s.release();
@@ -336,10 +414,10 @@ describe('voice session', () => {
       const { d } = deps(true);
       const s = createVoiceSession(d);
       ask(s);                                           // session 1's reply never comes
-      await vi.advanceTimersByTimeAsync(10000);
+      await vi.advanceTimersByTimeAsync(ASK_MS);
       ask(s);
       expect(s.answer(true, vi.fn())).toBe('stale');    // taken for session 1's: session 2 loses its reply
-      await vi.advanceTimersByTimeAsync(10000);         // session 2 times out; it forgives the one it discarded
+      await vi.advanceTimersByTimeAsync(ASK_MS);         // session 2 times out; it forgives the one it discarded
       const jump = vi.fn();
       ask(s);
       expect(s.answer(true, jump)).toBe('accepted');   // session 3 is back in step
@@ -356,7 +434,7 @@ describe('voice session', () => {
       s.release();
       expect(s.transcript()).toBe(true);
       s.asked();                                        // search 2 asks ("madrid"); its reply is slow
-      await vi.advanceTimersByTimeAsync(10000);
+      await vi.advanceTimersByTimeAsync(ASK_MS);
       expect(resume).toHaveBeenCalledTimes(1);          // search 2 timed out and put the radio back
       ask(s);                                           // search 3 asks ("sao paulo")
       const j2 = vi.fn();
@@ -375,7 +453,7 @@ describe('voice session', () => {
       s.abandon();                                      // a scroll while "thinking…": search 1's reply is on the way
       ask(s);                                           // search 2 asks before it lands
       expect(s.answer(true, vi.fn())).toBe('stale');    // search 1's reply
-      await vi.advanceTimersByTimeAsync(10000);         // search 2's own reply is slow
+      await vi.advanceTimersByTimeAsync(ASK_MS);         // search 2's own reply is slow
       ask(s);
       const j2 = vi.fn();
       const j3 = vi.fn();
@@ -405,13 +483,13 @@ describe('voice session', () => {
       const { d } = deps(true);
       const s = createVoiceSession(d);
       ask(s);
-      await vi.advanceTimersByTimeAsync(10000);         // search 1 times out; its reply is only slow
+      await vi.advanceTimersByTimeAsync(ASK_MS);         // search 1 times out; its reply is only slow
       s.start();
       expect(s.answer(true, vi.fn())).toBe('stale');    // lands mid-hold, before search 2 asked: cannot be search 2's
       s.release();
       expect(s.transcript()).toBe(true);
       s.asked();
-      await vi.advanceTimersByTimeAsync(10000);         // search 2's reply is slow too
+      await vi.advanceTimersByTimeAsync(ASK_MS);         // search 2's reply is slow too
       ask(s);
       const j2 = vi.fn();
       const j3 = vi.fn();
@@ -434,6 +512,126 @@ describe('voice session', () => {
       s.start();
       s.release();
       expect(s.transcript()).toBe(true);                // session 3 is back in step
+    });
+  });
+
+  describe('P3 fix round 1 (I1): a reply in prose that names no place', () => {
+    it('two prose searches that time out leave no debt: the third search\'s JSON reply is accepted', async () => {
+      const { d, resume } = deps(true);
+      const s = createVoiceSession(d);
+      ask(s);
+      expect(s.prose()).toBe('waiting');                // "Sorry, I can't find that": may be the answer, may not
+      await vi.advanceTimersByTimeAsync(ASK_MS);
+      expect(resume).toHaveBeenCalledTimes(1);
+      ask(s);
+      expect(s.prose()).toBe('waiting');
+      await vi.advanceTimersByTimeAsync(ASK_MS);
+      expect(resume).toHaveBeenCalledTimes(2);
+      const jump = vi.fn();
+      ask(s);
+      expect(s.answer(true, jump)).toBe('accepted');
+      expect(jump).toHaveBeenCalledTimes(1);
+    });
+
+    it('prose never settles: a JSON reply that follows within 25s is still accepted', async () => {
+      const { d, resume } = deps(true);
+      const jump = vi.fn();
+      const s = createVoiceSession(d);
+      ask(s);
+      expect(s.prose()).toBe('waiting');                // "Processing your request"
+      await vi.advanceTimersByTimeAsync(20000);
+      expect(s.isLive()).toBe(true);
+      expect(s.answer(true, jump)).toBe('accepted');
+      expect(jump).toHaveBeenCalledTimes(1);
+      expect(resume).not.toHaveBeenCalled();
+      ask(s);
+      expect(s.answer(false)).toBe('accepted');         // nothing was left owed
+    });
+
+    it('prose after a timed-out search is that search\'s late answer: discarded, and the live search keeps its own', async () => {
+      const { d } = deps(true);
+      const s = createVoiceSession(d);
+      ask(s);
+      await vi.advanceTimersByTimeAsync(ASK_MS);         // search 1 times out; its prose "no" is only slow
+      ask(s);
+      expect(s.prose()).toBe('stale');
+      const jump = vi.fn();
+      expect(s.answer(true, jump)).toBe('accepted');    // search 2's own
+      expect(jump).toHaveBeenCalledTimes(1);
+    });
+
+    it('a retry\'s prose from the first search pops that search\'s debt: the retry\'s JSON reply is accepted', () => {
+      const { d } = deps(true);
+      const s = createVoiceSession(d);
+      ask(s);
+      s.start();                                        // retry while search 1 waits: its reply is on the way
+      s.release();
+      expect(s.transcript()).toBe(true);
+      s.asked();
+      expect(s.prose()).toBe('stale');                  // search 1's answer, in prose
+      const jump = vi.fn();
+      expect(s.answer(true, jump)).toBe('accepted');
+      expect(jump).toHaveBeenCalledTimes(1);
+    });
+
+    it('prose that nobody is owed is ignored and leaves the next search alone', () => {
+      const { d } = deps(true);
+      const s = createVoiceSession(d);
+      expect(s.prose()).toBe('ignored');
+      s.start();
+      s.release();
+      expect(s.transcript()).toBe(true);
+      expect(s.prose()).toBe('ignored');                // not asked yet
+      s.asked();
+      expect(s.answer(false)).toBe('accepted');
+    });
+  });
+
+  describe('P3 fix round 2 (N1): prose counts however the search ends', () => {
+    it('prose, then a retry hold: the retry\'s JSON reply is accepted, and so is the next search\'s', () => {
+      const { d, resume } = deps(true);
+      const s = createVoiceSession(d);
+      ask(s);
+      expect(s.prose()).toBe('waiting');                // "Sorry, I can't find that"; "thinking…" stays
+      s.start();                                        // so the user holds again
+      s.release();
+      expect(s.transcript()).toBe(true);
+      s.asked();
+      const jump = vi.fn();
+      expect(s.answer(true, jump)).toBe('accepted');    // not discarded as the first search's reply
+      expect(jump).toHaveBeenCalledTimes(1);
+      expect(resume).not.toHaveBeenCalled();
+      ask(s);
+      expect(s.answer(false)).toBe('accepted');         // nothing was left owed
+    });
+
+    it('prose, then an abandon (wheel, side click, list pick): the next search\'s JSON reply is accepted', () => {
+      const { d, resume } = deps(true);
+      const s = createVoiceSession(d);
+      ask(s);
+      expect(s.prose()).toBe('waiting');
+      s.abandon();                                      // the wheel turns while "thinking…" still shows
+      expect(s.isLive()).toBe(false);
+      expect(resume).not.toHaveBeenCalled();
+      const jump = vi.fn();
+      ask(s);
+      expect(s.answer(true, jump)).toBe('accepted');
+      expect(jump).toHaveBeenCalledTimes(1);
+      ask(s);
+      expect(s.answer(false)).toBe('accepted');
+    });
+
+    it('the cost: prose that was a status line, then a retry, and the retry takes the first search\'s late JSON', () => {
+      const { d } = deps(true);
+      const s = createVoiceSession(d);
+      ask(s);
+      expect(s.prose()).toBe('waiting');                // "Processing your request"
+      s.start();
+      s.release();
+      expect(s.transcript()).toBe(true);
+      s.asked();
+      expect(s.answer(true, vi.fn())).toBe('accepted'); // the first search's JSON, usually the same request
+      expect(s.answer(true, vi.fn())).toBe('ignored');  // the retry's own then finds nobody waiting
     });
   });
 });

@@ -36,6 +36,10 @@ export class DataStore {
   places!: Places;
   private chunks = new Map<string, Promise<StationRow[]>>();
   private news: Promise<NewStation[]> | null = null;
+  /** The `date` of data/new.json (the nightly run that wrote it) once it has loaded; '' before or without one. */
+  newsDate = '';
+  /** Called with each country's rows as their chunk loads; Ruling 47 resolves favourites saved as bare ids from them. */
+  onRows: (rows: StationRow[]) => void = () => {};
 
   constructor(private base = 'data/', private fetchFn: typeof fetch = (u, i) => fetch(u, i)) {}
 
@@ -66,8 +70,9 @@ export class DataStore {
         .then(r => {
           if (r.status === 404) return null;
           if (!r.ok) throw new Error(`new.json: HTTP ${r.status}`);
-          return r.json().catch(() => null) as Promise<{ stations?: unknown } | null>;
+          return r.json().catch(() => null) as Promise<{ date?: unknown; stations?: unknown } | null>;
         })
+        .then(j => { if (typeof j?.date === 'string') this.newsDate = j.date; return j; })
         // A places.json cached from an older deploy may not match: keep rows whose place still has that name.
         .then(j => (Array.isArray(j?.stations) ? (j.stations as NewStation[]) : []).filter(s =>
           typeof s?.id === 'string' && typeof s.name === 'string' && Number.isInteger(s.place)
@@ -85,7 +90,11 @@ export class DataStore {
         .then(r => { if (!r.ok) throw new Error(`st/${cc}.json: HTTP ${r.status}`); return r.json(); })
         .then((j: { rows: Row[] }) => j.rows.map(([place, id, name, url, codec, bitrate, tags]) => ({
           place, id, name, url, codec, bitrate, tags: tags ? tags.split(',') : [],
-        })));
+        })))
+        .then(rows => {
+          try { this.onRows(rows); } catch { /* a listener's failure must not lose the chunk */ }
+          return rows;
+        });
       p.catch(() => this.chunks.delete(cc));
       this.chunks.set(cc, p);
     }

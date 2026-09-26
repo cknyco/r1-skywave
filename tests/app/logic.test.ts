@@ -3,10 +3,13 @@ import type { PlayerState } from '../../src/audio/player';
 import { Tuner } from '../../src/audio/tuner';
 import type { Places, StationRow } from '../../src/data/store';
 import { ListModel } from '../../src/ui/list';
-import { NEW_HEADER, newList, placeList } from '../../src/ui/news';
+import { worldList } from '../../src/ui/favs';
+import { FAV_HEADER, NEW_HEADER, newList, placeList } from '../../src/ui/news';
+import { createMatcher } from '../../src/voice/match';
 import {
-  ABOUT, ABOUT_HINT, ABOUT_TITLE, HINT, LIST_HINT, NOTE, countryName, doubleTap, lastOf, listTitle, listView, localTime,
-  msToNextMinute, placeForIntent, playable, sharePlayer, startPlace, stationCount, statusText, stripModel, viewport, whereLine,
+  ABOUT, ABOUT_HINT, ABOUT_TITLE, DIAG_EMPTY, DIAG_TITLE, EMPTY_FAVS, EMPTY_NEW, FAV_HINT, HINT, LIST_HINT, NOTE, countryName,
+  doubleTap, lastOf, listTitle, listView, localTime, msToNextMinute, placeForIntent, playable, sharePlayer, startPlace,
+  stationCount, statusText, stripModel, viewport, whereLine,
 } from '../../src/app/logic';
 
 const places: Places = {
@@ -72,6 +75,16 @@ describe('voice intent to place', () => {
   it('gives up on genre-only requests (the preview has no genre search)', () => {
     expect(placeForIntent(places, { place: null, country: null, genre: 'jazz' })).toBe(-1);
   });
+
+  it('Ruling 44: reads the place through the voice matcher when it has one, in the named country', () => {
+    // "New York City" is a big city the dataset has no place of that name for: the matcher finds the place near it.
+    const m = createMatcher(places, 'New York City,US,407,-740;Tokyo,JP,357,1397');
+    expect(placeForIntent(places, { place: 'New York City', country: 'US', genre: null }, m)).toBe(4);
+    expect(placeForIntent(places, { place: 'New York City', country: null, genre: null })).toBe(-1);   // no matcher: no such name
+    expect(placeForIntent(places, { place: 'sao paulo!', country: null, genre: null }, m)).toBe(3);
+    expect(placeForIntent(places, { place: 'Atlantis', country: 'DE', genre: null }, m)).toBe(0);    // falls back to the country
+    expect(placeForIntent(places, { place: null, country: 'JP', genre: null }, m)).toBe(2);
+  });
 });
 
 describe('text', () => {
@@ -107,7 +120,8 @@ describe('text', () => {
   });
 
   it('never mentions the forbidden name in UI text', () => {
-    const all = [...HINT, LIST_HINT, ...Object.values(NOTE), ABOUT_TITLE, ...ABOUT, ABOUT_HINT, 'tuning…', 'live', 'no signal'];
+    const all = [...HINT, LIST_HINT, FAV_HINT, EMPTY_NEW, EMPTY_FAVS, ...Object.values(NOTE), ABOUT_TITLE, ...ABOUT, ABOUT_HINT,
+      DIAG_TITLE, DIAG_EMPTY, 'tuning…', 'live', 'no signal'];
     for (const t of all) expect(t.toLowerCase()).not.toContain('garden');
     expect(HINT.join(' · ')).toBe('wheel: places · side: play/stop · hold: voice · drag: move the map · tap the strip: stations');
   });
@@ -187,17 +201,34 @@ describe('list view', () => {
       .toEqual({ i: 0, name: 'S9', fav: true, sel: true, head: false });
   });
 
-  it('marks the new-stations header row, which is never a favourite', () => {
-    const m = placeList([row('a'), row('b')], new Set(['a']), 3);
-    const v = listView(m, new Set(['a', NEW_HEADER]), '');
-    expect(v.rows.map(r => [r.name, r.head, r.fav])).toEqual([['★ New stations (3)', true, false], ['A', false, true], ['B', false, false]]);
+  it('marks the two header rows, which are never favourites', () => {
+    const m = placeList([row('a'), row('b')], new Set(['a']), 3, 1);
+    const v = listView(m, new Set(['a', NEW_HEADER, FAV_HEADER]), '');
+    expect(v.rows.map(r => [r.name, r.head, r.fav])).toEqual([
+      ['★ New stations worldwide (3)', true, false], ['♥ My favourites (1)', true, false], ['A', false, true], ['B', false, false],
+    ]);
+    expect(v.hint).toBe(LIST_HINT);
+    expect(v.empty).toEqual([]);
   });
 
-  it('titles the list with the place and its station count, or the new stations', () => {
-    expect(listTitle(placeList([row('a'), row('b')], new Set(), 3), 'Berlin', false)).toBe('Berlin · 2 stations');
-    expect(listTitle(placeList([row('a')], new Set(), 0), 'Berlin', false)).toBe('Berlin · 1 station');
+  it('titles the list with the place and its station count, or the worldwide list and its length', () => {
+    expect(listTitle(placeList([row('a'), row('b')], new Set(), 3, 0), 'Berlin', 'place')).toBe('Berlin · 2 stations');
+    expect(listTitle(placeList([row('a')], new Set(), 0, 0), 'Berlin', 'place')).toBe('Berlin · 1 station');
     const news = [{ id: 'n', name: 'N', place: 2, placeName: 'Tokyo', cc: 'JP', since: '2026-09-26' }];
-    expect(listTitle(newList(news), 'Berlin', true)).toBe('New stations · 1');
+    expect(listTitle(newList(news), 'Berlin', 'new')).toBe('New stations worldwide · 1');
+    expect(listTitle(worldList([]), 'Berlin', 'favs')).toBe('My favourites · 0');
+  });
+
+  it('Rulings 45 and 47: the worldwide lists explain an empty list; the favourites list shows no ♥ and its own hint', () => {
+    expect(listView(newList([]), new Set(), '', 'new', '2026-09-26').empty).toEqual([EMPTY_NEW, 'Last update: 2026-09-26']);
+    expect(listView(newList([]), new Set(), '', 'new').empty).toEqual([EMPTY_NEW]);
+    expect(listView(worldList([]), new Set(), '', 'favs').empty).toEqual([EMPTY_FAVS]);
+    expect(listView(new ListModel([], new Set()), new Set(), '', 'place').empty).toEqual(['no stations here']);
+    const favs = [{ id: 'f', name: 'F', place: 0, placeName: 'Berlin', cc: 'DE' }];
+    const v = listView(worldList(favs), new Set(['f']), '', 'favs');
+    expect(v.rows).toEqual([{ i: 0, name: 'F — Berlin, DE', fav: false, sel: true, head: false }]);
+    expect(v.hint).toBe(FAV_HINT);
+    expect(listView(newList([]), new Set(), '', 'new').hint).toBe(LIST_HINT);
   });
 });
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { project, TILE } from '../../src/geo/mercator';
+import { project, TILE, worldSize } from '../../src/geo/mercator';
 import { planFlight } from '../../src/map/camera';
-import { FETCH_LEAD_MS, fetchTiles, TileLayer, tileZoom, visibleTiles } from '../../src/map/tiles';
+import { FETCH_LEAD_MS, fetchTiles, mercatorRows, TileLayer, tileZoom, underlayRects, visibleTiles } from '../../src/map/tiles';
 
 describe('tile zoom', () => {
   it('asks one level deeper on a 2x canvas and never beyond the source maximum', () => {
@@ -150,5 +150,69 @@ describe('TileLayer', () => {
     expect(made).toHaveLength(n);
     expect(drawn).toHaveLength(visibleTiles(closer, W, H, 13, 2).spots.length);
     for (const a of drawn) expect(a).toHaveLength(9);   // source rectangle of the parent, then the spot
+  });
+
+  it('Ruling 46: draws the base under the tiles, dark ground first, then the tiles over it', () => {
+    const layer = new TileLayer(src, () => {});
+    layer.base = { width: 1024, height: 1024 } as HTMLCanvasElement;
+    layer.draw(ctx, cam, W, H, 2, false);
+    expect(drawn).toHaveLength(1);                       // nothing cached: the base alone
+    expect(drawn[0][0]).toBe(layer.base);
+    expect(drawn[0].slice(5)).toEqual([0, 0, W * 2, H * 2]);
+    layer.draw(ctx, cam, W, H, 2);
+    for (const i of made) { i.complete = true; i.naturalWidth = TILE; }
+    drawn.length = 0;
+    layer.draw(ctx, cam, W, H, 2, false);
+    expect(drawn).toHaveLength(1 + made.length);
+    expect(drawn[0][0]).toBe(layer.base);
+  });
+
+  it('Ruling 46: prefetches a view\'s tiles up to the cap, nearest the centre first, never twice', () => {
+    const layer = new TileLayer(src, () => {});
+    const n = visibleTiles(cam, W, H, 13, 2).spots.length;
+    expect(n).toBeGreaterThan(4);
+    expect(layer.prefetch(cam, W, H, 2, 4)).toBe(4);
+    const c = project(cam.lon, cam.lat, 8);
+    expect(made.map(i => i.src)).toContain(`t/8/${Math.floor(c.x / TILE)}/${Math.floor(c.y / TILE)}`);
+    expect(layer.prefetch(cam, W, H, 2, 100)).toBe(n - 4);   // the rest; the first four are cached
+    expect(layer.prefetch(cam, W, H, 2, 100)).toBe(0);
+    made.length = 0;
+    layer.draw(ctx, cam, W, H, 2);                            // the view itself asks for nothing new
+    expect(made).toHaveLength(0);
+  });
+});
+
+describe('Mercator base (Ruling 46)', () => {
+  const W = 240, H = 292;
+
+  it('maps each Mercator row to the texture row of its latitude', () => {
+    const rows = mercatorRows(1024, 1024);
+    expect(rows[511]).toBeGreaterThanOrEqual(511);            // the equator sits mid-texture
+    expect(rows[512]).toBeLessThanOrEqual(512);
+    expect(rows[0]).toBeGreaterThanOrEqual(0);
+    expect(rows[0]).toBeLessThan(30);                         // the top row is at +85°, near the texture's top
+    for (let y = 1; y < 1024; y++) expect(rows[y]).toBeGreaterThanOrEqual(rows[y - 1]);
+    const lat = 52.52, y = Math.floor((project(0, lat, 0).y / TILE) * 1024);   // Berlin's Mercator row at size 1024
+    expect(rows[y]).toBeCloseTo(((90 - lat) / 180) * 1024, -1);
+  });
+
+  it('places the view on the base, split in two across ±180° and clipped to the world', () => {
+    const at = { lon: 13.4, lat: 52.52, z: 7 };
+    const [r] = underlayRects(at, W, H, 2, 1024);
+    const k = 1024 / worldSize(7), c = project(at.lon, at.lat, 7);
+    expect(r[0]).toBeCloseTo((c.x - W / 2) * k, 6);
+    expect(r[1]).toBeCloseTo((c.y - H / 2) * k, 6);
+    expect(r.slice(2)).toEqual([W * k, H * k, 0, 0, W * 2, H * 2]);
+
+    const split = underlayRects({ lon: 179.99, lat: 0, z: 5 }, W, H, 2, 1024);
+    expect(split).toHaveLength(2);
+    expect(split[0][2] + split[1][2]).toBeCloseTo(W * (1024 / worldSize(5)), 6);
+    expect(split[1][0]).toBe(0);                              // the second part starts at the base's left edge
+    expect(split[0][4] + split[0][6]).toBeCloseTo(split[1][4], 6);
+
+    const top = underlayRects({ lon: 0, lat: 85.05, z: 4 }, W, H, 2, 1024);
+    expect(top).toHaveLength(1);
+    expect(top[0][1]).toBe(0);                                // the source starts at the world's top row
+    expect(top[0][5]).toBeCloseTo(H, 0);                      // drawn from mid-screen down: above it is off the world
   });
 });

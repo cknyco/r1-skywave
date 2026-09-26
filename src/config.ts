@@ -10,5 +10,10 @@ export const DOT_CSS = '#E8A33D';       // amber dots (look A); '#00FF82' for lo
 export const IMAGERY_DIM = 0.55;        // look A brightness of globe and tiles; 1 for look B
 export const RING_COLOR = '#FFFFFF';
 export const TEXTURE_URL = 'img/earth-2048.jpg';
+// Ruling 46: tile prefetch. A flight requests its landing view at the start (at most LANDING_PREFETCH tiles); once the
+// map has rested PREFETCH_DELAY_MS on a place, the wheel's next and previous places get at most NEIGHBOUR_PREFETCH each.
+export const LANDING_PREFETCH = 16;
+export const NEIGHBOUR_PREFETCH = 10;
+export const PREFETCH_DELAY_MS = 1500;
 // Runtime Radio Browser server. The build discovers servers via /json/servers; on 2026-09-25 de1 was the only one.
 export const RB_BASE = 'https://de1.api.radio-browser.info';

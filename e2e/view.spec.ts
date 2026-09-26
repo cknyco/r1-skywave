@@ -18,6 +18,7 @@ test.beforeEach(async ({ page }) => {
   await offline(page, () => { tileHits++; });
 });
 
+const settled = (page: Page) => page.waitForFunction(() => !(window as any).__view.moving);
 const median = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[s.length >> 1] : NaN; };
 
 async function throttled(page: Page, rate: number): Promise<CDPSession> {
@@ -196,4 +197,67 @@ test('after a pan the place under the ring is picked', async ({ page }) => {
   expect(at.x).toBeCloseTo(120, 0);
   expect(at.y).toBeCloseTo(146, 0);
   expect(target!.before).not.toBe(target!.i);
+});
+
+// Ruling 46: a tile that has not loaded shows the globe's imagery (reprojected), never the black ground.
+test('with every tile failing, the tile view still shows the imagery under the dots (never black)', async ({ page }) => {
+  await page.route('https://tiles.maps.eox.at/**', r => r.abort());   // overrides the fixture route of beforeEach
+  await open(page);
+  await settled(page);
+  // Mean brightness of the canvas with the base, then with it switched off: the base must lift it clearly.
+  const mean = () => page.evaluate(() => new Promise<number>(res => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const c = document.getElementById('map') as HTMLCanvasElement;
+      const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let s = 0;
+      for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2];
+      res(s / (d.length / 4));
+    }));
+  }));
+  const withBase = await mean();
+  await page.evaluate(() => { const v = (window as any).__view; v.tiles.base = null; v.wake(); });
+  const without = await mean();
+  console.log(`tiles failing: mean rgb sum ${withBase.toFixed(1)} with the base, ${without.toFixed(1)} without`);
+  expect(withBase).toBeGreaterThan(without + 15);
+});
+
+test('a flight requests its landing tiles when it starts, not only near its end (Ruling 46)', async ({ page }) => {
+  await page.addInitScript(() => {   // every tile URL the page sets, in order
+    const w = window as any;
+    w.__tileSrcs = [];
+    const d = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src')!;
+    Object.defineProperty(HTMLImageElement.prototype, 'src', {
+      configurable: true,
+      get(this: HTMLImageElement) { return d.get!.call(this); },
+      set(this: HTMLImageElement, v: string) { if (v.includes('tiles.maps.eox.at')) w.__tileSrcs.push(v); d.set!.call(this, v); },
+    });
+  });
+  await open(page);
+  await settled(page);
+  const r = await page.evaluate(({ lon, lat }) => {
+    const w = window as any, v = w.__view;
+    const before = w.__tileSrcs.length;
+    v.flyTo(lon, lat, 7);
+    return { sync: w.__tileSrcs.slice(before) as string[], w: v.w, h: v.h };   // set within flyTo itself
+  }, TOKYO);
+  const want = visibleTiles({ ...TOKYO, z: 7 }, r.w, r.h, TILE_SOURCE.maxZ, 2);
+  expect(want.spots.length).toBeLessThanOrEqual(16);
+  expect(r.sync.sort()).toEqual(want.spots.map(t => TILE_SOURCE.url(want.z, t.x, t.y)).sort());
+});
+
+test('M3 minor: the map follows a late change of the WebView size', async ({ page }) => {
+  await page.setViewportSize({ width: 240, height: 282 });
+  await open(page);
+  const size = () => page.evaluate(() => {
+    const v = (window as any).__view, c = document.getElementById('map') as HTMLCanvasElement;
+    return [v.w, v.h, c.width, c.height, document.getElementById('app')!.clientHeight];
+  });
+  expect(await size()).toEqual([240, 282, 480, 564, 282]);
+  await page.setViewportSize({ width: 240, height: 292 });
+  await expect.poll(size).toEqual([240, 292, 480, 584, 292]);
+  const ring = await page.evaluate(() => {
+    const r = document.getElementById('ring')!.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  expect(ring).toEqual({ x: 120, y: 146 });   // the ring stays on the map's centre
 });

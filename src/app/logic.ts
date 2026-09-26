@@ -3,18 +3,24 @@
 import type { PlayerState } from '../audio/player';
 import type { Places, StationRow } from '../data/store';
 import type { ListModel } from '../ui/list';
-import { NEW_HEADER } from '../ui/news';
+import { isHeader } from '../ui/news';
 import { findPlace, type Intent } from '../voice/intent';
+import type { Matcher } from '../voice/match';
 
 /** Controls, shown under the gate button. */
 export const HINT = ['wheel: places · side: play/stop', 'hold: voice · drag: move the map', 'tap the strip: stations'];
 export const LIST_HINT = 'side: play · hold: ♥ · tap: close';
+export const FAV_HINT = 'side: play · hold: remove · tap: close';
+/** Empty worldwide lists (Rulings 45, 47). */
+export const EMPTY_NEW = 'No new stations yet. The list fills every night.';
+export const EMPTY_FAVS = 'No favourites yet. Hold the side button on a station in a list to add it.';
 export const NOTE = {
   listening: 'listening…',
   thinking: 'thinking…',
   noVoice: 'voice unavailable',
   noMatch: 'no match',
   noData: 'no signal',
+  noPlace: 'place unknown',
 };
 
 /** About screen (Task 20): the attribution text of A.8. */
@@ -28,7 +34,10 @@ export const ABOUT = [
   "Globe imagery: We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services "
     + "(GIBS), part of NASA's Earth Science Data and Information System (ESDIS).",
 ];
-export const ABOUT_HINT = 'tap to close';
+export const ABOUT_HINT = 'wheel: scroll · tap or side: close';
+/** The voice log under the credits (Ruling 44): the last bridge events of voice searches, for a photo from the device. */
+export const DIAG_TITLE = 'Voice log (ms since the hold, event, message):';
+export const DIAG_EMPTY = 'No voice search yet.';
 
 /** Storage key 'last'. `id` (Ruling 38) is newer than `place`/`name`/`cc` — an older save simply has no `id`. */
 export interface Last { place: number; name?: string; cc?: string; id?: string }
@@ -36,7 +45,15 @@ export interface Last { place: number; name?: string; cc?: string; id?: string }
 /** The bottom strip, the status line and the ring. */
 export interface StripModel { status: string; name: string; where: string; live: boolean; ring: '' | 'tuning' | 'live' }
 
-export interface ListView { title: string; rows: { i: number; name: string; fav: boolean; sel: boolean; head: boolean }[] }
+/** What the list shows: the place's stations with the two header rows, or a worldwide list (Rulings 45, 47). */
+export type ListMode = 'place' | 'new' | 'favs';
+
+export interface ListView {
+  title: string;
+  rows: { i: number; name: string; fav: boolean; sel: boolean; head: boolean }[];
+  empty: string[];   // lines shown instead of rows when there are none
+  hint: string;
+}
 
 type Noise = { start(): void; stop(): void };
 export interface PlayerLike { play(url: string): Promise<PlayerState>; stop(): void; readonly state: PlayerState }
@@ -74,8 +91,17 @@ export function lastOf(places: Places, p: number): Last {
   return { place: p, name: places.name[p], cc: places.cc[p] };
 }
 
-/** The named place, else the biggest place of the named country. Genre-only requests give -1 (no genre search yet). */
-export function placeForIntent(places: Places, intent: Intent): number {
+/**
+ * Where an LLM intent points. With the voice matcher (Ruling 44) the place is read in the named country, so "New York"
+ * finds New York City, "London" with CA finds London, Canada, and a big city without a place of its own ("Tokyo") the
+ * place standing for it. Without the matcher, or when it finds nothing: the named place, else the biggest place of the
+ * named country. Genre-only requests give -1 (no genre search yet).
+ */
+export function placeForIntent(places: Places, intent: Intent, matcher?: Matcher): number {
+  if (matcher && intent.place) {
+    const m = matcher.match(intent.place, intent.country);
+    if (m >= 0) return m;
+  }
   const p = findPlace(places, intent);
   if (p >= 0 || !intent.country) return p;
   return biggest(places, i => places.cc[i] === intent.country);
@@ -144,21 +170,30 @@ function allowedUrl(u: string): boolean {
 /** Defence in depth over the build filters: https streams only, and never a radio.garden host. */
 export const playable = (rows: StationRow[]) => rows.filter(r => allowedUrl(r.url));
 
-/** The list's title line: the place and its station count, or how many new stations there are. */
-export function listTitle(list: ListModel, placeName: string, newMode: boolean): string {
-  const n = list.rows.filter(r => r.id !== NEW_HEADER).length;
-  return newMode ? `New stations · ${n}` : `${placeName} · ${stationCount(n)}`;
+/** The list's title line: the place and its station count, or the worldwide list and its length. */
+export function listTitle(list: ListModel, placeName: string, mode: ListMode): string {
+  const n = list.rows.filter(r => !isHeader(r.id)).length;
+  return mode === 'new' ? `New stations worldwide · ${n}` : mode === 'favs' ? `My favourites · ${n}` : `${placeName} · ${stationCount(n)}`;
 }
 
-/** Seven rows around the selection; the "★ New stations" header row is marked and never a favourite. */
-export function listView(list: ListModel, favs: Set<string>, title: string): ListView {
+/**
+ * Seven rows around the selection; header rows are marked and never favourites; the favourites list needs no ♥ marks.
+ * An empty worldwide list explains itself; the new-stations one adds the date of the data (`updated`).
+ */
+export function listView(list: ListModel, favs: Set<string>, title: string, mode: ListMode = 'place', updated = ''): ListView {
   const w = list.window(7);
+  const empty = w.rows.length ? []
+    : mode === 'favs' ? [EMPTY_FAVS]
+      : mode === 'new' ? [EMPTY_NEW, ...(updated ? [`Last update: ${updated}`] : [])]
+        : ['no stations here'];
   return {
     title,
     rows: w.rows.map((r, k) => {
-      const head = r.id === NEW_HEADER;
-      return { i: w.offset + k, name: r.name, fav: !head && favs.has(r.id), sel: w.offset + k === list.sel, head };
+      const head = isHeader(r.id);
+      return { i: w.offset + k, name: r.name, fav: !head && mode !== 'favs' && favs.has(r.id), sel: w.offset + k === list.sel, head };
     }),
+    empty,
+    hint: mode === 'favs' ? FAV_HINT : LIST_HINT,
   };
 }
 

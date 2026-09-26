@@ -23,9 +23,3 @@ export class ListModel {
     return { rows: this.rows.slice(offset, offset + n), offset };
   }
 }
-
-export function toggleFav(favs: Set<string>, id: string): Set<string> {
-  const next = new Set(favs);
-  if (next.has(id)) next.delete(id); else next.add(id);
-  return next;
-}

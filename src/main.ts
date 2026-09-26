@@ -1,30 +1,40 @@
 // Skywave (Tasks 18-20): the map app. It grew out of the sound preview (Task P): the same gate, controls, voice
-// session, station list and storage, with the map (Task 13) where the preview had its text screen.
+// session, station list and storage, with the map (Task 13) where the preview had its text screen. Task P3 added the
+// voice fast path and log (Ruling 44), the worldwide lists of new stations and favourites (Rulings 45, 47), the
+// never-black tile ground and tile prefetch (Ruling 46), and the resize path.
 import css from './ui/styles.css';
 import {
   NOTE, lastOf, listTitle, listView, msToNextMinute, placeForIntent, playable, sharePlayer, startPlace, stripModel,
-  viewport, type Last,
+  viewport, type Last, type ListMode,
 } from './app/logic';
 import { Player } from './audio/player';
 import { createStatic } from './audio/static';
 import { Tuner } from './audio/tuner';
-import { CONNECT_TIMEOUT_MS, RB_BASE, SETTLE_MS, TEXTURE_URL, ZOOM_DEFAULT } from './config';
+import {
+  CONNECT_TIMEOUT_MS, GLOBE_BELOW_ZOOM, NEIGHBOUR_PREFETCH, PREFETCH_DELAY_MS, RB_BASE, SETTLE_MS, TEXTURE_URL,
+  ZOOM_DEFAULT,
+} from './config';
 import { DataStore, type NewStation, type StationRow } from './data/store';
 import { bindControls, type Action } from './input/controls';
 import { Globe, loadTexture } from './map/globe';
 import { minCountForZoom } from './map/lod';
 import { TILE_SOURCE } from './map/tile-source';
-import { TileLayer } from './map/tiles';
+import { mercatorBase, TileLayer } from './map/tiles';
 import { MapView, viewSize } from './map/view';
 import { buildWalk, stepWalk } from './map/walk';
 import {
   askLLM, installKeyboardFallback, installMessageHook, onPluginMessage, startVoice, stopVoice, type PluginMessage,
 } from './platform/r1';
 import { createStore, loadJson, saveJson } from './platform/storage';
-import { toggleFav, type ListModel } from './ui/list';
-import { NEW_HEADER, newList, placeList } from './ui/news';
+import {
+  FAVS_KEY, LEGACY_FAVS_KEY, favIds, favOf, favsDoc, loadFavs, removeFav, resolveFavs, toggleFav, worldList, type Fav,
+} from './ui/favs';
+import type { ListModel } from './ui/list';
+import { FAV_HEADER, HEADS, NEW_HEADER, favHeaderName, isHeader, newList, placeList } from './ui/news';
 import { AppScreen } from './ui/screen';
-import { intentPrompt, isIntentReply, parseIntent } from './voice/intent';
+import { Diag, kindOf } from './voice/diag';
+import { intentPrompt, readReply } from './voice/intent';
+import { createMatcher, type Matcher } from './voice/match';
 import { createVoiceSession } from './voice/session';
 
 const style = document.createElement('style');
@@ -47,9 +57,35 @@ async function boot(): Promise<() => void> {
   const [places, texture] = await Promise.all([data.load(), loadTexture(TEXTURE_URL)]);
   const walk = buildWalk(places.lon, places.lat);
   const last = await loadJson<Last | null>(kv, 'last', null);
-  let favs = new Set(await loadJson<string[]>(kv, 'favs', []));
+  // Ruling 47: favourites with their names and places; ids saved by the app before P3 are carried over unresolved.
+  let favs: Fav[] = loadFavs(await loadJson<unknown>(kv, FAVS_KEY, null), await loadJson<unknown>(kv, LEGACY_FAVS_KEY, null), places);
+  const saveFavs = () => { void saveJson(kv, FAVS_KEY, favsDoc(favs)); };
   const query = new URLSearchParams(location.search).get('place');
   const first = startPlace(places, query, last, Intl.DateTimeFormat().resolvedOptions().timeZone);
+
+  let cur = -1;              // the selected place; only onPick (the view's report) sets it
+  let started = false;       // the gate was tapped: audio is unlocked, a pick tunes
+  let want: { place: number; id: string } | null = null;   // a station chosen in a worldwide list, played when its place is picked
+  let note = '';
+  let picked: StationRow | null = null;   // a station chosen in the list; side button resumes it
+  let list: ListModel | null = null;
+  let mode: ListMode = 'place';   // what the list shows: the place's stations, or a worldwide list (Rulings 45, 47)
+  let listReq = 0;
+  let news: NewStation[] = [];
+  let voiceOn = false;
+  let about = false;
+  let matcher: Matcher | null = null;
+  const match = () => (matcher ??= createMatcher(places));   // built on the first voice search, not at boot
+  const diag = new Diag();
+
+  // A carried-over favourite is resolved when a chunk holding it loads (the start place's, a list, a tune).
+  data.onRows = rows => {
+    const next = resolveFavs(favs, rows, places);
+    if (!next) return;
+    favs = next;
+    saveFavs();
+    if (list && mode === 'favs') { const sel = list.sel; list = worldList(favs); list.sel = sel; drawList(); }
+  };
 
   // Ruling 38: the exact station last playing, if it's still in that place's chunk — the gate offers to resume it.
   let resumeStation: StationRow | null = null;
@@ -59,18 +95,6 @@ async function boot(): Promise<() => void> {
     } catch { /* no chunk yet: no resume affordance, startPlace's place still stands */ }
   }
   if (resumeStation) screen.setGateLabel('Tap to resume', resumeStation.name);
-
-  let cur = -1;              // the selected place; only onPick (the view's report) sets it
-  let started = false;       // the gate was tapped: audio is unlocked, a pick tunes
-  let want: { place: number; id: string } | null = null;   // a new station chosen in the list, played when its place is picked
-  let note = '';
-  let picked: StationRow | null = null;   // a station chosen in the list; side button resumes it
-  let list: ListModel | null = null;
-  let listReq = 0;
-  let newMode = false;       // the list shows the new stations instead of the place's stations (Task 19b)
-  let news: NewStation[] = [];
-  let voiceOn = false;
-  let about = false;
 
   const render = () => screen.render(stripModel(places, cur, player.state, tuner.station, note, new Date()));
   const click = (id: string) => { void fetch(`${RB_BASE}/json/url/${encodeURIComponent(id)}`).catch(() => {}); };
@@ -97,11 +121,11 @@ async function boot(): Promise<() => void> {
   };
 
   // Ruling 37: voice search stops the radio before it starts listening, and puts back what was playing — the
-  // same station, not just the place's top one — when nothing is found within 10s, voice is unavailable, or
-  // there's no transcript. A found place jumps there instead and never resumes. The target is resolved at resume
-  // time: `picked` is preferred over `tuner.station` because a list pick still loading when voice starts hasn't
-  // set `tuner.station` yet, and `shared.reattach()` must run first, or `tuner.resume()` would wait on a player
-  // that a pick has parked.
+  // same station, not just the place's top one — when nothing is found in time (10s for the transcript, 25s for the
+  // LLM's reply, Ruling 44), voice is unavailable, or there's no transcript. A found place jumps there instead and
+  // never resumes. The target is resolved at resume time: `picked` is preferred over `tuner.station` because a list
+  // pick still loading when voice starts hasn't set `tuner.station` yet, and `shared.reattach()` must run first, or
+  // `tuner.resume()` would wait on a player that a pick has parked.
   const voice = createVoiceSession({
     isPlaying: () => player.state === 'playing' || player.state === 'loading',
     stop: () => tuner.cancel(),
@@ -111,13 +135,30 @@ async function boot(): Promise<() => void> {
       void tuner.resume(cur, target?.id);
     },
     onSettle: () => { note = ''; render(); },
+    onTimeout: ms => diag.push('result', `timeout after ${ms} ms: back to the station before`),
   });
 
   const { w, h } = viewSize(screen.canvas);
   const globe = new Globe(texture.tex, texture.TW, texture.TH, w, h);
   const tiles = new TileLayer(TILE_SOURCE, () => map.wake());   // a tile only loads after the map asked for it
+  tiles.base = mercatorBase(texture.tex, texture.TW, texture.TH);   // Ruling 46: the globe's imagery under the tiles
   const map = new MapView(screen.canvas, places, globe, tiles, p => onPick(p));
   map.onFrame = g => screen.setAttribution(g ? '' : TILE_SOURCE.attribution);
+
+  // Ruling 46: once the map has rested on a place, the wheel's next and previous places get their tiles, a few each.
+  let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
+  const prefetchNeighbours = () => {
+    clearTimeout(prefetchTimer);
+    prefetchTimer = setTimeout(() => {
+      if (map.moving) { prefetchNeighbours(); return; }
+      if (cur < 0 || map.cam.z < GLOBE_BELOW_ZOOM) return;
+      const min = minCountForZoom(map.cam.z);
+      for (const dir of [1, -1] as const) {
+        const p = stepWalk(walk, cur, dir, i => places.count[i] >= min);
+        if (p >= 0) tiles.prefetch({ lon: places.lon[p], lat: places.lat[p], z: map.cam.z }, map.w, map.h, map.dpr, NEIGHBOUR_PREFETCH);
+      }
+    }, PREFETCH_DELAY_MS);
+  };
 
   const go = (p: number, resumeId?: string) => {
     voice.abandon();   // a scroll, drag or jump (the voice-found one has already ended the session) must not resume later
@@ -128,6 +169,7 @@ async function boot(): Promise<() => void> {
     render();
     if (resumeId) void tuner.resume(p, resumeId); else tuner.select(p);
     persistLast();   // place-only for now (tuner.station still belongs to the old place); a play fills in `id`
+    prefetchNeighbours();
   };
 
   // The view reports every selection: a wheel step or a jump (map.select) at once, a drag when the map settles.
@@ -138,7 +180,7 @@ async function boot(): Promise<() => void> {
     else { cur = p; render(); }   // before the gate tap: the strip follows; nothing tunes, nothing is saved
   };
 
-  /** Voice and the new-stations list jump anywhere: the map arcs there and lands at region zoom or closer. */
+  /** Voice and the worldwide lists jump anywhere: the map arcs there and lands at region zoom or closer. */
   const jump = (p: number) => map.select(p, Math.max(map.cam.z, ZOOM_DEFAULT));
 
   const playPick = async (s: StationRow) => {
@@ -152,26 +194,45 @@ async function boot(): Promise<() => void> {
     render();
   };
 
-  /** A new station (Task 19b): new.json has no stream URL, so the tuner plays it by id once the map picks its place. */
-  const playNew = (s: StationRow) => {
+  /**
+   * A station of a worldwide list (Rulings 45, 47): the rows have no stream URL, so the tuner plays it by id once the
+   * map picks its place. A favourite whose place is not known yet (a carried-over id) cannot fly anywhere.
+   */
+  const playWorld = (s: StationRow) => {
+    if (s.place < 0) { note = NOTE.noPlace; render(); return; }
     want = { place: s.place, id: s.id };
     jump(s.place);   // onPick → go(place, id) → tuner.resume(place, id): this station, not the place's first
   };
 
-  const drawList = () => screen.showList(list && listView(list, favs, listTitle(list, places.name[cur] ?? '', newMode)));
-  const closeList = () => { listReq++; list = null; newMode = false; drawList(); };
+  const drawList = () => screen.showList(list && listView(list, favIds(favs), listTitle(list, places.name[cur] ?? '', mode), mode, data.newsDate));
+  const closeList = () => { listReq++; list = null; mode = 'place'; drawList(); };
+
+  /** The place's stations under the two header rows; the station on air is selected when it is in the list. */
   const openList = async () => {
     const req = ++listReq;
     const at = cur;
     const [rows, fresh] = await Promise.all([
       at >= 0 ? data.stationsFor(at).then(playable).catch((): StationRow[] => []) : Promise.resolve([]),
-      data.newStations().catch((): NewStation[] => []),   // optional file: offline means no header row this time
+      data.newStations().catch((): NewStation[] => news),   // optional file: offline keeps what was loaded before
     ]);
     if (req !== listReq || at !== cur) return;
     news = fresh;
-    list = placeList(rows, favs, news.length);
+    list = placeList(rows, favIds(favs), news.length, favs.length);
+    mode = 'place';
     const playing = list.rows.findIndex(r => r.id === tuner.station?.id);
-    if (playing > 0) list.sel = playing;
+    if (playing >= HEADS) list.sel = playing;
+    drawList();
+  };
+
+  /** A worldwide list, from its header row or its map button: the new stations (★) or the favourites (♥). */
+  const openWorld = async (m: 'new' | 'favs') => {
+    const req = ++listReq;
+    if (m === 'new') {
+      news = await data.newStations().catch((): NewStation[] => news);
+      if (req !== listReq) return;
+    }
+    list = m === 'new' ? newList(news) : worldList(favs);
+    mode = m;
     drawList();
   };
 
@@ -180,18 +241,30 @@ async function boot(): Promise<() => void> {
     const s = l.selected();
     if (!s) return;   // an empty list: nothing to play or mark
     if (a.type === 'toggle') {
-      if (s.id === NEW_HEADER) { list = newList(news); newMode = true; drawList(); return; }
-      const fromNew = newMode;
+      if (s.id === NEW_HEADER) { void openWorld('new'); return; }
+      if (s.id === FAV_HEADER) { void openWorld('favs'); return; }
+      const world = mode !== 'place';
       closeList();
-      if (fromNew) playNew(s); else void playPick(s);
-    } else if (a.type === 'voiceStart' && s.id !== NEW_HEADER) {   // the header row is not a station
-      favs = toggleFav(favs, s.id);
-      void saveJson(kv, 'favs', [...favs]);
+      if (world) playWorld(s); else void playPick(s);
+    } else if (a.type === 'voiceStart' && !isHeader(s.id)) {   // hold: add or remove a favourite; header rows are not stations
+      if (mode === 'favs') {
+        favs = removeFav(favs, s.id);
+        const sel = l.sel;
+        list = worldList(favs);
+        list.sel = Math.min(sel, Math.max(0, list.rows.length - 1));
+      } else {
+        const n = mode === 'new' ? news.find(x => x.id === s.id) : undefined;   // a new-list row's name is its label
+        if (mode === 'new' && !n) return;
+        favs = toggleFav(favs, n ?? favOf(s, places));
+        const head = l.rows.find(r => r.id === FAV_HEADER);   // the place list's "♥ My favourites (M)" row
+        if (head) head.name = favHeaderName(favs.length);
+      }
+      saveFavs();
       drawList();
     }
   };
 
-  const openAbout = () => { about = true; screen.showAbout(true); };
+  const openAbout = () => { about = true; screen.showAbout(true, diag.lines()); };
   const closeAbout = () => { about = false; screen.showAbout(false); };
 
   const toggle = () => {
@@ -208,40 +281,79 @@ async function boot(): Promise<() => void> {
       voiceOn = false;
       stopVoice();
       if (note === NOTE.listening) { note = ''; render(); }
-      voice.release();   // the mic is closed: apply an outcome that landed mid-hold, or arm the 10s clock
+      voice.release();   // the mic is closed: apply an outcome that landed mid-hold, or arm the clock
       return;
     }
-    if (about) { closeAbout(); return; }   // any input only closes the About screen
+    if (about) {   // the wheel scrolls the About screen (to its voice log), anything else closes it
+      if (a.type === 'step') screen.scrollAbout(a.dir); else closeAbout();
+      return;
+    }
     if (list) { listAction(list, a); return; }
     if (a.type === 'step') {
-      const min = minCountForZoom(map.cam.z);   // the places the map shows at this zoom
+      const min = minCountForZoom(map.targetZ);   // the places the map shows at this zoom, or at the zoom it is flying to
       const next = stepWalk(walk, cur, a.dir, i => places.count[i] >= min);
       if (next >= 0) map.select(next);   // onPick → go(next): the strip changes at once, the tune after SETTLE_MS
     } else if (a.type === 'toggle') toggle();
     else if (a.type === 'voiceStart') {
-      voice.start();               // records "was playing" and stops the radio; the 10s clock is armed later
+      diag.start();
+      voice.start();               // records "was playing" and stops the radio; the clock is armed later
       voiceOn = startVoice();      // only called after the radio is already stopped
       if (voiceOn) { note = NOTE.listening; render(); }
-      else { voice.end(); note = NOTE.noVoice; render(); }   // voice unavailable: resume right away, no wait
+      else { voice.end(); diag.push('result', 'voice unavailable'); note = NOTE.noVoice; render(); }   // resume right away
     }
   };
 
+  /** A voice search found place p: close whatever covers the map and fly there. */
+  const found = (p: number) => () => { closeList(); closeAbout(); jump(p); };
+  const named = (p: number) => `${places.name[p]}, ${places.cc[p]}`;
+
   // The session attributes every sttEnded and LLM reply to the session that asked for it (FIFO), so a retry hold never
   // inherits the previous session's in-flight messages, and holds back any outcome that lands while the mic is still open.
+  // Ruling 44: a transcript asking for a known place, big city or country jumps at once (the fast path); only the rest
+  // goes to the LLM. Fix round 1 (I2): "asking for" as Matcher.request reads it, so "play Michael Jackson" is not
+  // Jackson; fix rounds 2 and 3 (N2, N3) read the LLM's plain-text answers the same way, sentence by sentence
+  // (Matcher.reply). Every bridge message and what came of it goes into the voice log.
   const onMessage = (m: PluginMessage) => {
     if (m.type === 'sttEnded') {
+      diag.push('sttEnded', m);
       if (!voice.transcript()) return;   // an earlier session's transcript, or none expected: changes nothing
-      if (m.transcript && askLLM(intentPrompt(m.transcript))) { voice.asked(); note = NOTE.thinking; render(); }
-      else voice.resolved(false);   // no transcript, or the bridge call itself failed: nothing more is coming
+      const text = m.transcript?.trim() ?? '';
+      const p = text ? match().request(text) : -1;
+      if (p >= 0) {
+        diag.push('result', `fast path: ${named(p)}`);
+        voice.resolved(true, found(p));
+      } else if (text && askLLM(intentPrompt(text))) {
+        diag.push('llm-sent', text);
+        voice.asked();
+        note = NOTE.thinking;
+        render();
+      } else {
+        diag.push('result', text ? 'bridge unavailable' : 'no transcript');
+        voice.resolved(false);   // no transcript, or the bridge call itself failed: nothing more is coming
+      }
       return;
     }
-    if (!isIntentReply(m)) return;   // a bridge status message, not an answer
-    const intent = parseIntent(m);
-    const p = intent ? placeForIntent(places, intent) : -1;   // genre-only requests are not handled yet
-    const found = p >= 0;
-    const r = voice.answer(found, () => { closeList(); closeAbout(); jump(p); });
-    if (r === 'stale' || found) return;   // an earlier session's reply never jumps or resumes; a found one jumps (maybe at voiceEnd)
-    if (r === 'accepted' || !voice.isLive()) { note = NOTE.noMatch; render(); }   // an unasked no-match still shows, changes nothing
+    const r = readReply(m);
+    diag.push(kindOf(m, r), m);
+    if (r.kind === 'status' || r.kind === 'none') return;   // a bridge status message, not an answer
+    // An intent names a place or country. A plain-text answer is read like a spoken request (fix round 2, N2): "Taking
+    // you to Lisbon" is Lisbon, "Sorry, I can't play Michael Jackson" names no place, just as "play Michael Jackson" does.
+    // Fix round 3 (N3): one sentence of it is enough, so "Tuning in to Tokyo. Have fun!" and "place: Lisbon, country:
+    // PT" land too.
+    const p = r.kind === 'intent' ? placeForIntent(places, r.intent, match()) : match().reply(r.text);
+    // Plain text naming no place is not taken as the answer (the app before P3 ignored all plain text): the r1 may send
+    // prose that is no reply at all, and taking it would end every search at once. The session still counts it, so a
+    // prose "no" leaves no debt to discard the next search's reply, however that search ends (fix rounds 1 and 2).
+    if (r.kind === 'text' && p < 0) {
+      const w = voice.prose();
+      diag.push('result', w === 'waiting' ? 'text without a place: still waiting' : `${w}: text without a place`);
+      return;
+    }
+    const hit = p >= 0;   // genre-only requests are not handled yet
+    const whose = voice.answer(hit, found(p));
+    diag.push('result', `${whose}: ${hit ? named(p) : 'no place'}`);
+    if (whose === 'stale' || hit) return;   // an earlier session's reply never jumps or resumes; a found one jumps (maybe at voiceEnd)
+    if (whose === 'accepted' || !voice.isLive()) { note = NOTE.noMatch; render(); }   // an unasked no-match still shows, changes nothing
   };
 
   // Drag pans; when the map settles, the view picks the place under the ring (onPick → go → tune after SETTLE_MS).
@@ -258,6 +370,14 @@ async function boot(): Promise<() => void> {
     window.addEventListener('pointercancel', end);
   };
 
+  // M3 minor: the WebView may settle on its final size after boot; the layout and the map follow it.
+  window.addEventListener('resize', () => {
+    const s = viewport(window.innerWidth, window.innerHeight);
+    screen.fit(s.w, s.h);
+    const v = viewSize(screen.canvas);
+    map.resize(v.w, v.h);
+  });
+
   Object.assign(window, {
     __view: map,
     __app: {
@@ -266,6 +386,8 @@ async function boot(): Promise<() => void> {
       station: () => tuner.station?.name ?? null,
       walkSize: () => walk.order.length,
       audio: () => ({ paused: audio.paused, src: audio.src }),   // e2e: the media element isn't in the DOM
+      diag: () => diag.lines(),
+      favs: () => favs,
     },
   });
 
@@ -284,6 +406,7 @@ async function boot(): Promise<() => void> {
     screen.onStripTap(() => { if (list) closeList(); else void openList(); });
     screen.onListTap(closeList);
     screen.onZoom(dz => map.zoomBy(dz));
+    screen.onWorldLists(() => void openWorld('new'), () => void openWorld('favs'));
     screen.onStatusDoubleTap(openAbout);
     screen.onAboutTap(closeAbout);
     bindDrag();

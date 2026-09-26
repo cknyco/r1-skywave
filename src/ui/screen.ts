@@ -1,4 +1,4 @@
-import { ABOUT, ABOUT_HINT, ABOUT_TITLE, HINT, LIST_HINT, doubleTap, type ListView, type StripModel } from '../app/logic';
+import { ABOUT, ABOUT_HINT, ABOUT_TITLE, DIAG_EMPTY, DIAG_TITLE, HINT, doubleTap, type ListView, type StripModel } from '../app/logic';
 
 const byId = (id: string) => document.getElementById(id) as HTMLElement;
 
@@ -27,8 +27,8 @@ export function onTap(el: HTMLElement, fn: (e: PointerEvent) => void): void {
 
 /**
  * The app's DOM in index.html's #app: the map canvas and ring, the status line and tile attribution, the zoom buttons,
- * the bottom strip, the station list, the About screen and the "Tap to tune in" gate. Text goes in via textContent
- * only: station names are third-party data.
+ * the ★ and ♥ buttons of the worldwide lists, the bottom strip, the station list, the About screen with the voice log
+ * and the "Tap to tune in" gate. Text goes in via textContent only: station names and transcripts are third-party data.
  */
 export class AppScreen {
   readonly canvas = byId('map') as HTMLCanvasElement;
@@ -42,17 +42,19 @@ export class AppScreen {
   private list = byId('list');
   private title = this.list.querySelector('.title') as HTMLElement;
   private rows = this.list.querySelector('.rows') as HTMLElement;
+  private listHint = this.list.querySelector('.hint') as HTMLElement;
   private about = byId('about');
+  private diag: HTMLElement;
   private gate = byId('gate');
 
   constructor() {
-    (this.list.querySelector('.hint') as HTMLElement).textContent = LIST_HINT;
     const hint = this.gate.querySelector('.hint') as HTMLElement;
     hint.replaceChildren();
     for (const line of HINT) div(hint, 'line', line);
     div(this.about, 'title', ABOUT_TITLE);
     for (const line of ABOUT) div(this.about, '', line, 'p');
     div(this.about, 'hint', ABOUT_HINT, 'p');
+    this.diag = div(this.about, 'diag');
   }
 
   /** Sizes #app, which MapView measures when it is created (Ruling 19: never a fixed 282). */
@@ -85,6 +87,11 @@ export class AppScreen {
     onTap(byId('zin'), () => fn(1));
     onTap(byId('zout'), () => fn(-1));
   }
+  /** The ★ (new stations worldwide, Ruling 45) and ♥ (my favourites, Ruling 47) map buttons. */
+  onWorldLists(news: () => void, favs: () => void): void {
+    onTap(byId('bnew'), () => news());
+    onTap(byId('bfav'), () => favs());
+  }
 
   /** A double tap on the status line (top left); its box is larger than its text, and there even when it is empty. */
   onStatusDoubleTap(fn: () => void): void {
@@ -111,7 +118,12 @@ export class AppScreen {
     this.list.hidden = !v;
     if (!v) return;
     this.title.textContent = v.title;
-    if (!v.rows.length) { this.rows.replaceChildren(); div(this.rows, 'row', 'no stations here'); return; }
+    this.listHint.textContent = v.hint;
+    if (!v.rows.length) {
+      this.rows.replaceChildren();
+      for (const line of v.empty) div(this.rows, 'empty', line);
+      return;
+    }
     this.rows.replaceChildren(...v.rows.map(r => {
       const d = document.createElement('div');
       d.className = 'row' + (r.head ? ' head' : '') + (r.sel ? ' sel' : '');
@@ -121,8 +133,19 @@ export class AppScreen {
     }));
   }
 
-  showAbout(open: boolean): void {
+  /** Opens the About screen at its top with the voice log (Ruling 44), oldest line first; or closes it. */
+  showAbout(open: boolean, diag: string[] = []): void {
     this.about.hidden = !open;
+    if (!open) return;
+    this.diag.replaceChildren();
+    div(this.diag, 'dhead', DIAG_TITLE, 'p');
+    for (const line of diag.length ? diag : [DIAG_EMPTY]) div(this.diag, '', line, 'p');
+    this.about.scrollTop = 0;
+  }
+
+  /** The wheel scrolls the About screen (to reach the voice log); dir 1 is down. */
+  scrollAbout(dir: number): void {
+    this.about.scrollTop += dir * 60;
   }
 
   fail(message: string): void {

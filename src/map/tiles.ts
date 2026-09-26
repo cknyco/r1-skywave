@@ -1,5 +1,6 @@
 import { IMAGERY_DIM } from '../config';
-import { type Cam, project, TILE } from '../geo/mercator';
+import { type Cam, MAX_LAT, project, TILE, worldSize } from '../geo/mercator';
+import { RAD } from '../geo/sphere';
 import type { Flight } from './camera';
 
 export interface TileSource {
@@ -49,8 +50,60 @@ export function fetchTiles(f: Flight | null, now: number): boolean {
   return !f || f.t0 + f.dur - now <= FETCH_LEAD_MS || f.peakZ >= Math.min(f.from.z, f.to.z);
 }
 
+/** For each row of a size×size Web Mercator world, the row of an equirectangular texture th rows high to copy there. */
+export function mercatorRows(size: number, th: number): Int32Array {
+  const rows = new Int32Array(size);
+  for (let y = 0; y < size; y++) {
+    const lat = Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + 0.5)) / size))) / RAD;
+    rows[y] = Math.min(th - 1, Math.max(0, Math.floor(((90 - lat) / 180) * th)));
+  }
+  return rows;
+}
+
+/**
+ * Ruling 46: the globe's NASA texture (equirectangular, lon -180 at the left edge) reprojected once to a size×size Web
+ * Mercator canvas, the ground the tile layer draws under its tiles, so a tile not loaded yet is never black.
+ */
+export function mercatorBase(tex: Uint32Array, tw: number, th: number, size = 1024): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d')!;
+  const img = g.createImageData(size, size);
+  const out = new Uint32Array(img.data.buffer);
+  const rows = mercatorRows(size, th);
+  for (let y = 0; y < size; y++) {
+    const v = rows[y] * tw, o = y * size;
+    for (let x = 0; x < size; x++) out[o + x] = tex[v + (((x + 0.5) * tw / size) | 0)];
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+/**
+ * Where the w×h CSS-pixel view at cam lies on a b×b Mercator base, as drawImage arguments (source rectangle in base
+ * pixels, then target in device pixels at scale s): one rectangle, or two where the view crosses ±180°; the rows above
+ * and below the world (beyond ±85.05°) are left out.
+ */
+export function underlayRects(cam: Cam, w: number, h: number, s: number, b: number): number[][] {
+  const S = worldSize(cam.z), k = b / S;
+  const c = project(cam.lon, Math.max(-MAX_LAT, Math.min(MAX_LAT, cam.lat)), cam.z);
+  const y0 = c.y - h / 2, top = Math.max(0, y0), bottom = Math.min(S, y0 + h);
+  if (bottom <= top) return [];
+  const out: number[][] = [];
+  let x = (((c.x - w / 2) % S) + S) % S, done = 0;
+  while (done < w) {
+    const run = Math.min(w - done, S - x);
+    out.push([x * k, top * k, run * k, (bottom - top) * k, done * s, (top - y0) * s, run * s, (bottom - top) * s]);
+    done += run;
+    x = 0;
+  }
+  return out;
+}
+
 export class TileLayer {
   private cache = new Map<string, HTMLImageElement>();
+  /** Ruling 46: the ground under the tiles (mercatorBase); null draws the plain dark ground. */
+  base: HTMLCanvasElement | null = null;
 
   constructor(private src: TileSource, private onLoad: () => void, private max = 96) {}
 
@@ -77,8 +130,27 @@ export class TileLayer {
   }
 
   /**
+   * Ruling 46: requests the tiles of a view before it shows (a flight's landing, the wheel's next places): at most `cap`
+   * tiles not cached yet, nearest the view's centre first. Returns how many it requested.
+   */
+  prefetch(cam: Cam, w: number, h: number, s = 1, cap = 16): number {
+    const { z, spots } = visibleTiles(cam, w, h, this.src.maxZ, s);
+    const cx = (w * s) / 2, cy = (h * s) / 2;
+    const d = (t: TileSpot) => Math.hypot(t.dx + t.dw / 2 - cx, t.dy + t.dh / 2 - cy);
+    let n = 0;
+    for (const t of [...spots].sort((a, b) => d(a) - d(b))) {
+      if (n >= cap) break;
+      if (this.cache.has(`${z}/${t.x}/${t.y}`)) continue;
+      this.get(z, t.x, t.y);
+      n++;
+    }
+    return n;
+  }
+
+  /**
    * Draws the w×h CSS-pixel view onto a canvas whose backing store is s times that size; leaves the transform at identity.
-   * With fetch false no Image is created: a missing tile shows its loaded parent or the dark ground.
+   * With fetch false no Image is created. A missing tile shows its loaded parent, else the base (Ruling 46), else the
+   * dark ground.
    */
   draw(ctx: CanvasRenderingContext2D, cam: Cam, w: number, h: number, s = 1, fetch = true): void {
     const W = Math.round(w * s), H = Math.round(h * s);
@@ -86,6 +158,8 @@ export class TileLayer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#06080d';
     ctx.fillRect(0, 0, W, H);
+    const base = this.base;
+    if (base) for (const r of underlayRects(cam, w, h, s, base.width)) ctx.drawImage(base, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]);
     for (const t of spots) {
       const img = fetch ? this.get(z, t.x, t.y) : this.ready(z, t.x, t.y);
       if (img && img.complete && img.naturalWidth) { ctx.drawImage(img, t.dx, t.dy, t.dw, t.dh); continue; }
