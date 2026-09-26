@@ -1,0 +1,39 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>r1 harness</title>
+<!-- Dev-only (npm run dev, then /dev/harness.html): the app in an r1-sized frame, with buttons for the hardware
+     events and stand-ins for creationStorage, the LLM bridge and speech-to-text. The r1 has no double click (Ruling 21). -->
+<style>body{font:13px system-ui;display:flex;gap:16px;padding:16px;background:#222;color:#eee}
+iframe{width:240px;height:292px;border:0;border-radius:18px;background:#000}
+button{display:block;width:170px;margin:4px 0;padding:6px}
+pre{max-width:360px;white-space:pre-wrap}</style></head>
+<body>
+<iframe id="f" src="/"></iframe>
+<div>
+  <button data-ev="scrollUp">wheel up</button>
+  <button data-ev="scrollDown">wheel down</button>
+  <button data-ev="sideClick">side click</button>
+  <button data-ev="longPressStart">long press start</button>
+  <button data-ev="longPressEnd">long press end</button>
+  <button id="stt">transcript "jazz from Paris"</button>
+  <pre id="log"></pre>
+</div>
+<script>
+var f = document.getElementById('f');
+var log = function (s) { document.getElementById('log').textContent += s + '\n'; };
+f.addEventListener('load', function () {
+  var w = f.contentWindow, m = new Map();
+  w.creationStorage = { plain: {
+    getItem: function (k) { return Promise.resolve(m.has(k) ? m.get(k) : null); },
+    setItem: function (k, v) { if (!/^[A-Za-z0-9+/=]*$/.test(v)) return Promise.reject(new Error('not base64')); m.set(k, v); return Promise.resolve(); }
+  } };
+  w.PluginMessageHandler = { postMessage: function (s) {
+    log('LLM <- ' + s.slice(0, 120));
+    setTimeout(function () { w.onPluginMessage({ message: '{"place":"Paris","country":"FR","genre":"jazz"}' }); }, 400); } };
+  w.CreationVoiceHandler = { postMessage: function (s) { log('voice ' + s); } };
+});
+document.querySelectorAll('[data-ev]').forEach(function (b) {
+  b.addEventListener('click', function () { f.contentWindow.dispatchEvent(new Event(b.dataset.ev)); }); });
+document.getElementById('stt').addEventListener('click', function () {
+  f.contentWindow.onPluginMessage({ type: 'sttEnded', transcript: 'jazz from Paris' }); });
+</script>
+</body></html>

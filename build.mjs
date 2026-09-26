@@ -25,7 +25,7 @@ function copyStatic(appSrc) {
     cpSync('probe', `${out}/probe`, { recursive: true });
     cpSync(QR_LIB, `${out}/probe/qrcode.js`);
   }
-  if (serve && existsSync('dev')) cpSync('dev', `${out}/dev`, { recursive: true });
+  if (serve && existsSync('dev')) cpSync('dev', `${out}/dev`, { recursive: true, filter: f => !f.endsWith('.ts') });
   writeFileSync(`${out}/index.html`, readFileSync('index.html', 'utf8').replace('__APP_JS__', appSrc));
 }
 
@@ -33,9 +33,15 @@ if (serve) {
   copyStatic('app.js');
   const ctx = await esbuild.context(options);
   await ctx.watch();
+  if (existsSync('dev/view-harness.ts')) {   // dev-only renderer harness (Task 13); the release build never includes it
+    const view = await esbuild.context({ ...options, entryPoints: ['dev/view-harness.ts'], outfile: `${out}/dev/view-harness.js` });
+    await view.rebuild();
+    await view.watch();
+  }
   const { port } = await ctx.serve({ servedir: out, port: 8240 });
   console.log(`app:     http://localhost:${port}/`);
   console.log(`harness: http://localhost:${port}/dev/harness.html`);
+  console.log(`view:    http://localhost:${port}/dev/view.html`);
 } else {
   await esbuild.build({ ...options, minify: true });
   const hash = createHash('sha256').update(readFileSync('dist/app.js')).digest('hex').slice(0, 8);

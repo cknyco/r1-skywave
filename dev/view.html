@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=240, initial-scale=1, user-scalable=no">
+<title>Skywave view harness</title>
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #06080d; color: #f4efe6;
+  font: 12px/1.3 system-ui, -apple-system, Roboto, sans-serif; }
+#app { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+#map { position: absolute; left: 0; top: 0; touch-action: none; }
+#ring { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); box-sizing: border-box;
+  border: 1.5px solid rgba(255, 255, 255, 0.9); border-radius: 50%; pointer-events: none; }
+#hud { position: absolute; left: 8px; right: 8px; bottom: 6px; font-size: 11px; opacity: .85;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="app"><canvas id="map"></canvas><div id="ring"></div><div id="hud"></div></div>
+<script src="view-harness.js"></script>
+</body>
+</html>
