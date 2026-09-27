@@ -1,8 +1,13 @@
 {
-  "added": 3,
+  "added": 20,
   "baseline": false,
   "byCountry": {
     "AR": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "BE": {
       "added": 1,
       "changed": 0,
       "removed": 0
@@ -11,6 +16,26 @@
       "added": 0,
       "changed": 0,
       "removed": 1
+    },
+    "ES": {
+      "added": 2,
+      "changed": 0,
+      "removed": 0
+    },
+    "IN": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "PL": {
+      "added": 5,
+      "changed": 0,
+      "removed": 0
+    },
+    "TR": {
+      "added": 8,
+      "changed": 0,
+      "removed": 0
     },
     "US": {
       "added": 2,
@@ -21,6 +46,6 @@
   "changed": 0,
   "date": "2026-09-27",
   "removed": 2,
-  "total": 7923,
+  "total": 7940,
   "v": 1
 }
