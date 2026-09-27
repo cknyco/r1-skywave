@@ -17,9 +17,23 @@ html, body { margin: 0; overflow: hidden; background: #06080d; color: #f4efe6;
 #zoom { position: absolute; right: 6px; top: 70px; display: flex; flex-direction: column; gap: 6px; }
 /* Rulings 45 and 47: the worldwide lists, new stations (★) and favourites (♥), under the zoom buttons. */
 #lists { position: absolute; right: 6px; top: 148px; display: flex; flex-direction: column; gap: 6px; }
-#zoom button, #lists button { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: rgba(0, 0, 0, .55);
-  color: #fff; font: 18px/30px system-ui, -apple-system, Roboto, sans-serif; }
+/* Rulings 49, 50: ✈ (fly mode, lit while on) and ⓘ (About) top right, away from the OS back bar; SVG icons, no emoji. */
+#tools { position: absolute; right: 6px; top: 6px; display: flex; gap: 6px; }
+#zoom button, #lists button, #tools button { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px;
+  background: rgba(0, 0, 0, .55); color: #fff; font: 18px/30px system-ui, -apple-system, Roboto, sans-serif; }
 #lists button { color: #E8A33D; font-size: 16px; }
+#tools svg { display: block; width: 20px; height: 20px; margin: 5px auto; }
+#bfly.on { background: #E8A33D; color: #111; }
+/* Ruling 49: the volume bar under the status line, shown for 1.5 s after a wheel event. */
+#vol { position: absolute; left: 8px; top: 32px; width: 150px; padding: 5px 8px; box-sizing: border-box; border-radius: 8px;
+  background: rgba(0, 0, 0, .72); pointer-events: none; }
+#vol .row { display: flex; align-items: center; gap: 6px; }
+#vol svg { flex: none; width: 14px; height: 14px; }
+#vol .bar { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .25); overflow: hidden; }
+#vol .fill { height: 100%; background: #E8A33D; }
+#vol .pct { flex: none; min-width: 36px; font-size: 11px; line-height: 14px; text-align: right; white-space: nowrap; }
+#vol .note { margin-top: 3px; font-size: 9px; line-height: 12px; opacity: .8; }
+#vol .note:empty { display: none; }
 #strip { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; padding: 9px 10px 0; box-sizing: border-box;
   background: linear-gradient(transparent, rgba(0, 0, 0, .85) 35%); }
 #strip .name { font-size: 15px; line-height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -51,3 +65,4 @@ html, body { margin: 0; overflow: hidden; background: #06080d; color: #f4efe6;
 #start .resume-station { display: inline-block; margin-top: 4px; max-width: 190px; font-size: 11px; opacity: .75;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #gate .hint { font-size: 10px; line-height: 14px; opacity: .5; text-align: center; white-space: nowrap; }
+#gate .hint svg { width: 12px; height: 12px; vertical-align: -2px; }

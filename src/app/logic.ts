@@ -1,14 +1,16 @@
 // The app's pure logic (Task 18; grown out of the sound preview's src/preview/logic.ts, Task P): start place, the
-// strip and list text, the About text, the double tap, and the player shared by the Tuner and the station list.
+// strip and list text, the About text, and the player shared by the Tuner and the station list. What the wheel does on
+// the map (volume or places, Ruling 49) is in src/app/wheel.ts.
 import type { PlayerState } from '../audio/player';
 import type { Places, StationRow } from '../data/store';
 import type { ListModel } from '../ui/list';
 import { isHeader } from '../ui/news';
 import { findPlace, type Intent } from '../voice/intent';
 import type { Matcher } from '../voice/match';
+import { VOLUME_MUTED } from './wheel';
 
-/** Controls, shown under the gate button. */
-export const HINT = ['wheel: places · side: play/stop', 'hold: voice · drag: move the map', 'tap the strip: stations'];
+/** Controls, shown under the gate button (Ruling 49); the screen draws each ✈ as the ✈ button's own icon. */
+export const HINT = ['wheel: volume · side: play/stop', '✈ then wheel: places · hold: voice', 'tap the strip: stations'];
 export const LIST_HINT = 'side: play · hold: ♥ · tap: close';
 export const FAV_HINT = 'side: play · hold: remove · tap: close';
 /** Empty worldwide lists (Rulings 45, 47). */
@@ -142,15 +144,25 @@ export const msToNextMinute = (nowMs: number) => 60000 - (nowMs % 60000);
 /** The app's CSS size: the WebView's inner size (240×292 on the r1, Ruling 19), 240×282 when it reports none yet. */
 export const viewport = (w: number, h: number) => ({ w: w > 0 ? w : 240, h: h > 0 ? h : 282 });
 
-/** Strip: the station on air (amber while live) or the place's station count, then "Place · Country · HH:MM". */
+/**
+ * The status line: a note, or the player's state, with "muted" added while the volume is 0 (Ruling 49), so a radio
+ * reopened at 0 % never looks live and silent. A note wins: it is short-lived, and "muted" after it could reach ✈.
+ */
+export const statusLine = (state: PlayerState, note: string, muted: boolean): string =>
+  note || [statusText(state), muted ? VOLUME_MUTED : ''].filter(Boolean).join(' · ');
+
+/**
+ * Strip: the station on air (amber while live) or the place's station count, then "Place · Country · HH:MM".
+ * `muted`: the audio element reads back a volume of 0.
+ */
 export function stripModel(
-  places: Places, place: number, state: PlayerState, station: StationRow | null, note: string, now: Date,
+  places: Places, place: number, state: PlayerState, station: StationRow | null, note: string, now: Date, muted = false,
 ): StripModel {
-  if (place < 0) return { status: note, name: '', where: '', live: false, ring: '' };
+  if (place < 0) return { status: statusLine('idle', note, muted), name: '', where: '', live: false, ring: '' };
   const here = station && station.place === place ? station : null;
   const live = state === 'playing' && here !== null;
   return {
-    status: note || statusText(state),
+    status: statusLine(state, note, muted),
     name: here ? here.name : stationCount(places.count[place]),
     where: [places.name[place], whereLine(places.cc[place], places.tz[place], now)].filter(Boolean).join(' · '),
     live,
@@ -194,16 +206,6 @@ export function listView(list: ListModel, favs: Set<string>, title: string, mode
     }),
     empty,
     hint: mode === 'favs' ? FAV_HINT : LIST_HINT,
-  };
-}
-
-/** Feed it every tap (time in ms, position in px): true on a second tap within `ms` and `px` of the first. */
-export function doubleTap(ms = 400, px = 24): (t: number, x: number, y: number) => boolean {
-  let first: { t: number; x: number; y: number } | null = null;
-  return (t, x, y) => {
-    const hit = first !== null && t - first.t <= ms && Math.hypot(x - first.x, y - first.y) <= px;
-    first = hit ? null : { t, x, y };
-    return hit;
   };
 }
 

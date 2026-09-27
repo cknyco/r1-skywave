@@ -15,5 +15,11 @@ export const TEXTURE_URL = 'img/earth-2048.jpg';
 export const LANDING_PREFETCH = 16;
 export const NEIGHBOUR_PREFETCH = 10;
 export const PREFETCH_DELAY_MS = 1500;
+// Ruling 49: the wheel is the volume, 5 % per wheel event, 0–100 % of the r1's own volume, shown for VOLUME_SHOW_MS.
+// ✈ switches it to places; fly mode ends FLY_MS after the tap or the last wheel step, counted only while the map rests.
+export const VOLUME_STEP = 5;
+export const VOLUME_SHOW_MS = 1500;
+export const VOLUME_SAVE_MS = 400;      // the volume is saved once the wheel has rested this long
+export const FLY_MS = 3000;
 // Runtime Radio Browser server. The build discovers servers via /json/servers; on 2026-09-25 de1 was the only one.
 export const RB_BASE = 'https://de1.api.radio-browser.info';

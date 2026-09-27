@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { fakeStreams, offline } from './net';
+import { fly } from './ui';
 
 // The r1 is roughly 6-10x slower than a desktop (Ruling 36). This checks the wheel walk still
 // updates the place and the strip promptly under that load, not just at full desktop speed.
@@ -19,6 +20,7 @@ test('wheel walk changes place within 500ms at 6x CPU throttling', async ({ page
   await page.click('#start');
   await expect(page.locator('#gate')).toBeHidden({ timeout: 15000 });
   await expect(page.locator('#strip .where')).toHaveText(/^Berlin · /, { timeout: 15000 });
+  await fly(page);   // Ruling 49: the wheel steps places in fly mode; each step keeps it on
 
   for (let i = 0; i < 5; i++) {
     // Dispatch the event and poll __app.place() and the strip from inside the same page.evaluate, so no CDP

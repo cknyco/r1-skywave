@@ -1,4 +1,5 @@
-import { ABOUT, ABOUT_HINT, ABOUT_TITLE, DIAG_EMPTY, DIAG_TITLE, HINT, doubleTap, type ListView, type StripModel } from '../app/logic';
+import { ABOUT, ABOUT_HINT, ABOUT_TITLE, DIAG_EMPTY, DIAG_TITLE, HINT, type ListView, type StripModel } from '../app/logic';
+import { VOLUME_SHOW_MS } from '../config';
 
 const byId = (id: string) => document.getElementById(id) as HTMLElement;
 
@@ -27,8 +28,9 @@ export function onTap(el: HTMLElement, fn: (e: PointerEvent) => void): void {
 
 /**
  * The app's DOM in index.html's #app: the map canvas and ring, the status line and tile attribution, the zoom buttons,
- * the ★ and ♥ buttons of the worldwide lists, the bottom strip, the station list, the About screen with the voice log
- * and the "Tap to tune in" gate. Text goes in via textContent only: station names and transcripts are third-party data.
+ * the ★ and ♥ buttons of the worldwide lists, the ✈ and ⓘ buttons (Rulings 49, 50), the volume bar, the bottom strip,
+ * the station list, the About screen with the voice log and the "Tap to tune in" gate. Text goes in via textContent
+ * only: station names and transcripts are third-party data.
  */
 export class AppScreen {
   readonly canvas = byId('map') as HTMLCanvasElement;
@@ -46,11 +48,24 @@ export class AppScreen {
   private about = byId('about');
   private diag: HTMLElement;
   private gate = byId('gate');
+  private fly = byId('bfly');
+  private vol = byId('vol');
+  private volFill = this.vol.querySelector('.fill') as HTMLElement;
+  private volPct = this.vol.querySelector('.pct') as HTMLElement;
+  private volNote = this.vol.querySelector('.note') as HTMLElement;
+  private volTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
     const hint = this.gate.querySelector('.hint') as HTMLElement;
+    const plane = this.fly.querySelector('svg') as SVGElement;
     hint.replaceChildren();
-    for (const line of HINT) div(hint, 'line', line);
+    for (const text of HINT) {   // a ✈ in a hint is the button's own icon: a text ✈ can be a colour emoji on Android
+      const line = div(hint, 'line');
+      text.split('✈').forEach((part, k) => {
+        if (k) line.appendChild(plane.cloneNode(true));
+        line.appendChild(document.createTextNode(part));
+      });
+    }
     div(this.about, 'title', ABOUT_TITLE);
     for (const line of ABOUT) div(this.about, '', line, 'p');
     div(this.about, 'hint', ABOUT_HINT, 'p');
@@ -93,10 +108,25 @@ export class AppScreen {
     onTap(byId('bfav'), () => favs());
   }
 
-  /** A double tap on the status line (top left); its box is larger than its text, and there even when it is empty. */
-  onStatusDoubleTap(fn: () => void): void {
-    const tap = doubleTap();
-    onTap(this.status, e => { if (tap(e.timeStamp, e.clientX, e.clientY)) fn(); });
+  /** The ✈ button (Ruling 49): fly mode on, or off when it is lit. */
+  onFly(fn: () => void): void { onTap(this.fly, () => fn()); }
+  /** The ⓘ button (Ruling 50): About, with one tap. */
+  onInfo(fn: () => void): void { onTap(byId('binfo'), () => fn()); }
+
+  /** Lights the ✈ button (amber, like live) while the wheel flies between places. */
+  setFly(on: boolean): void {
+    this.fly.classList.toggle('on', on);
+    this.fly.setAttribute('aria-pressed', String(on));
+  }
+
+  /** Shows the volume bar for VOLUME_SHOW_MS after each change (Ruling 49). */
+  showVolume(v: { fill: number; text: string; note: string }): void {
+    this.volFill.style.width = `${v.fill}%`;
+    this.volPct.textContent = v.text;
+    this.volNote.textContent = v.note;
+    this.vol.hidden = false;
+    clearTimeout(this.volTimer);
+    this.volTimer = setTimeout(() => { this.vol.hidden = true; }, VOLUME_SHOW_MS);
   }
 
   render(m: StripModel): void {

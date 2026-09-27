@@ -3,6 +3,9 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: 'e2e',
-  use: { baseURL: 'http://localhost:8240', viewport: { width: 240, height: 292 }, deviceScaleFactor: 2 },
+  use: {
+    baseURL: 'http://localhost:8240', viewport: { width: 240, height: 292 }, deviceScaleFactor: 2,
+    headless: true, launchOptions: { args: ['--mute-audio'] },   // never a visible or audible browser
+  },
   webServer: { command: 'npm run dev', url: 'http://localhost:8240', reuseExistingServer: true },
 });

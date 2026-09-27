@@ -1,18 +1,20 @@
 // Skywave (Tasks 18-20): the map app. It grew out of the sound preview (Task P): the same gate, controls, voice
 // session, station list and storage, with the map (Task 13) where the preview had its text screen. Task P3 added the
 // voice fast path and log (Ruling 44), the worldwide lists of new stations and favourites (Rulings 45, 47), the
-// never-black tile ground and tile prefetch (Ruling 46), and the resize path.
+// never-black tile ground and tile prefetch (Ruling 46), and the resize path. Task P4a made the wheel the volume, with a
+// ✈ fly mode for places (Ruling 49), and put About behind a ⓘ button (Ruling 50).
 import css from './ui/styles.css';
 import {
   NOTE, lastOf, listTitle, listView, msToNextMinute, placeForIntent, playable, sharePlayer, startPlace, stripModel,
   viewport, type Last, type ListMode,
 } from './app/logic';
+import { FLY_OFF, VOLUME_KEY, flyEnds, flyNext, readVolume, stepVolume, volumeView, type FlyEvent, type WheelMode } from './app/wheel';
 import { Player } from './audio/player';
-import { createStatic } from './audio/static';
+import { createStatic, type Static } from './audio/static';
 import { Tuner } from './audio/tuner';
 import {
   CONNECT_TIMEOUT_MS, GLOBE_BELOW_ZOOM, NEIGHBOUR_PREFETCH, PREFETCH_DELAY_MS, RB_BASE, SETTLE_MS, TEXTURE_URL,
-  ZOOM_DEFAULT,
+  VOLUME_SAVE_MS, ZOOM_DEFAULT,
 } from './config';
 import { DataStore, type NewStation, type StationRow } from './data/store';
 import { bindControls, type Action } from './input/controls';
@@ -47,7 +49,7 @@ screen.fit(size.w, size.h);   // before MapView measures #app
 
 const audio = new Audio();   // the one media element; the gate tap unlocks it
 audio.preload = 'none';
-let noise: { start(): void; stop(): void } | undefined;
+let noise: Static | undefined;
 
 async function boot(): Promise<() => void> {
   installMessageHook();
@@ -57,6 +59,10 @@ async function boot(): Promise<() => void> {
   const [places, texture] = await Promise.all([data.load(), loadTexture(TEXTURE_URL)]);
   const walk = buildWalk(places.lon, places.lat);
   const last = await loadJson<Last | null>(kv, 'last', null);
+  // Ruling 49: the volume, 0–100 % of the r1's own, remembered. The element keeps it when its src changes, so it holds
+  // for every stream; the tuning static follows it once the gate tap has made it.
+  let volume = readVolume(await loadJson<unknown>(kv, VOLUME_KEY, null));
+  audio.volume = volume / 100;
   // Ruling 47: favourites with their names and places; ids saved by the app before P3 are carried over unresolved.
   let favs: Fav[] = loadFavs(await loadJson<unknown>(kv, FAVS_KEY, null), await loadJson<unknown>(kv, LEGACY_FAVS_KEY, null), places);
   const saveFavs = () => { void saveJson(kv, FAVS_KEY, favsDoc(favs)); };
@@ -96,7 +102,9 @@ async function boot(): Promise<() => void> {
   }
   if (resumeStation) screen.setGateLabel('Tap to resume', resumeStation.name);
 
-  const render = () => screen.render(stripModel(places, cur, player.state, tuner.station, note, new Date()));
+  // The status line adds "muted" while the element reads back 0 (Ruling 49): a radio reopened at 0 % must not look
+  // live and silent. Read back, like the bar: a WebView that ignores the setter plays, so it does not say muted.
+  const render = () => screen.render(stripModel(places, cur, player.state, tuner.station, note, new Date(), audio.volume === 0));
   const click = (id: string) => { void fetch(`${RB_BASE}/json/url/${encodeURIComponent(id)}`).catch(() => {}); };
   // A stop triggered from voiceStart (Ruling 37) can still fire a late, spurious state change on the audio
   // element (removeAttribute('src') + load()); that must not clobber the "listening…"/"thinking…" note it just set.
@@ -143,7 +151,45 @@ async function boot(): Promise<() => void> {
   const tiles = new TileLayer(TILE_SOURCE, () => map.wake());   // a tile only loads after the map asked for it
   tiles.base = mercatorBase(texture.tex, texture.TW, texture.TH);   // Ruling 46: the globe's imagery under the tiles
   const map = new MapView(screen.canvas, places, globe, tiles, p => onPick(p));
-  map.onFrame = g => screen.setAttribution(g ? '' : TILE_SOURCE.attribution);
+
+  // Ruling 49: fly mode (src/app/wheel.ts), lit on the ✈ button. The map's flights feed it whatever the mode; a timer
+  // at flyEnds ends it once the map has rested FLY_MS since the tap or the last wheel step.
+  let fly = FLY_OFF;
+  let flyTimer: ReturnType<typeof setTimeout> | undefined;
+  let flying = false;   // map.moving as fly mode last heard it
+  const flyEvent = (e: FlyEvent): WheelMode => {
+    const was = fly.mode;
+    const now = performance.now();
+    fly = flyNext(fly, e, now);
+    if (fly.mode !== was) screen.setFly(fly.mode === 'fly');
+    clearTimeout(flyTimer);
+    const end = flyEnds(fly);
+    if (end < Infinity) flyTimer = setTimeout(() => flyEvent('tick'), end - now);
+    return fly.mode;
+  };
+  /** Tells fly mode when a flight starts or the map lands: from every frame, and right after a wheel step's select. */
+  const flights = () => {
+    if (map.moving === flying) return;
+    flying = map.moving;
+    flyEvent(flying ? 'moving' : 'rest');
+  };
+  map.onFrame = g => { screen.setAttribution(g ? '' : TILE_SOURCE.attribution); flights(); };
+
+  // Ruling 49: a wheel event on the map outside fly mode. The bar shows what the element reads back, and the volume is
+  // saved once the wheel has rested VOLUME_SAVE_MS (and on the way out), not on each of the many events of a turn.
+  let volumeSave: ReturnType<typeof setTimeout> | undefined;
+  const saveVolume = () => { clearTimeout(volumeSave); volumeSave = undefined; void saveJson(kv, VOLUME_KEY, volume); };
+  const turnVolume = (dir: 1 | -1) => {
+    const max = volume === 100 && dir < 0;
+    const muted = audio.volume === 0;
+    volume = stepVolume(volume, dir);
+    audio.volume = volume / 100;
+    noise?.level(volume / 100);
+    screen.showVolume(volumeView(audio.volume, max));
+    if ((audio.volume === 0) !== muted) render();   // the status line's "muted" comes or goes
+    clearTimeout(volumeSave);
+    volumeSave = setTimeout(saveVolume, VOLUME_SAVE_MS);
+  };
 
   // Ruling 46: once the map has rested on a place, the wheel's next and previous places get their tiles, a few each.
   let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -209,6 +255,7 @@ async function boot(): Promise<() => void> {
 
   /** The place's stations under the two header rows; the station on air is selected when it is in the list. */
   const openList = async () => {
+    flyEvent('close');
     const req = ++listReq;
     const at = cur;
     const [rows, fresh] = await Promise.all([
@@ -226,6 +273,7 @@ async function boot(): Promise<() => void> {
 
   /** A worldwide list, from its header row or its map button: the new stations (★) or the favourites (♥). */
   const openWorld = async (m: 'new' | 'favs') => {
+    flyEvent('close');
     const req = ++listReq;
     if (m === 'new') {
       news = await data.newStations().catch((): NewStation[] => news);
@@ -264,7 +312,7 @@ async function boot(): Promise<() => void> {
     }
   };
 
-  const openAbout = () => { about = true; screen.showAbout(true, diag.lines()); };
+  const openAbout = () => { flyEvent('close'); about = true; screen.showAbout(true, diag.lines()); };
   const closeAbout = () => { about = false; screen.showAbout(false); };
 
   const toggle = () => {
@@ -290,11 +338,14 @@ async function boot(): Promise<() => void> {
     }
     if (list) { listAction(list, a); return; }
     if (a.type === 'step') {
+      if (flyEvent('step') === 'volume') { turnVolume(a.dir); return; }   // Ruling 49: the map never moves for the volume
       const min = minCountForZoom(map.targetZ);   // the places the map shows at this zoom, or at the zoom it is flying to
       const next = stepWalk(walk, cur, a.dir, i => places.count[i] >= min);
       if (next >= 0) map.select(next);   // onPick → go(next): the strip changes at once, the tune after SETTLE_MS
+      flights();   // the flight has started: fly mode's countdown waits for the landing
     } else if (a.type === 'toggle') toggle();
     else if (a.type === 'voiceStart') {
+      flyEvent('close');
       diag.start();
       voice.start();               // records "was playing" and stops the radio; the clock is armed later
       voiceOn = startVoice();      // only called after the radio is already stopped
@@ -385,7 +436,7 @@ async function boot(): Promise<() => void> {
       place: () => cur,
       station: () => tuner.station?.name ?? null,
       walkSize: () => walk.order.length,
-      audio: () => ({ paused: audio.paused, src: audio.src }),   // e2e: the media element isn't in the DOM
+      audio: () => ({ paused: audio.paused, src: audio.src, volume: audio.volume }),   // e2e: the media element isn't in the DOM
       diag: () => diag.lines(),
       favs: () => favs,
     },
@@ -407,14 +458,18 @@ async function boot(): Promise<() => void> {
     screen.onListTap(closeList);
     screen.onZoom(dz => map.zoomBy(dz));
     screen.onWorldLists(() => void openWorld('new'), () => void openWorld('favs'));
-    screen.onStatusDoubleTap(openAbout);
+    screen.onFly(() => flyEvent('tap'));
+    screen.onInfo(openAbout);
     screen.onAboutTap(closeAbout);
     bindDrag();
+    noise?.level(volume / 100);
+    if (audio.volume === 0) screen.showVolume(volumeView(audio.volume, false));   // reopened at 0 %: the bar says muted
     // Ruling 38: only touch storage once we're actually running — leaving the gate untapped must not
-    // downgrade or lose a resume offer that was never acted on.
-    window.addEventListener('visibilitychange', () => { if (document.hidden) persistLast(); });
-    window.addEventListener('pagehide', persistLast);
-    window.addEventListener('backHome', persistLast);   // the r1 platform's own "leaving the creation" signal
+    // downgrade or lose a resume offer that was never acted on. A volume still waiting to be saved goes too.
+    const leave = () => { persistLast(); if (volumeSave !== undefined) saveVolume(); };
+    window.addEventListener('visibilitychange', () => { if (document.hidden) leave(); });
+    window.addEventListener('pagehide', leave);
+    window.addEventListener('backHome', leave);   // the r1 platform's own "leaving the creation" signal
     if (cur >= 0) go(cur, resumeStation?.id);
   };
 }

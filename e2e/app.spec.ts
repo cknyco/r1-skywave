@@ -1,14 +1,16 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { NEIGHBOUR_PREFETCH, PREFETCH_DELAY_MS, SETTLE_MS } from '../src/config';
+import { FLY_MS, NEIGHBOUR_PREFETCH, PREFETCH_DELAY_MS, SETTLE_MS, VOLUME_SAVE_MS, VOLUME_SHOW_MS } from '../src/config';
 import { TILE_SOURCE } from '../src/map/tile-source';
 import { minCountForZoom } from '../src/map/lod';
 import { visibleTiles } from '../src/map/tiles';
 import { buildWalk, stepWalk } from '../src/map/walk';
 import { fold } from '../src/voice/fold';
 import { fakeStreams, newStations, offline, TILE } from './net';
+import { fly } from './ui';
 
 // The app at the r1's 240×292 CSS viewport (dpr 2). Nothing leaves localhost (e2e/net.ts): map tiles come from a
-// fixture, streams are faked, and data/new.json is absent unless a test serves one.
+// fixture, streams are faked, and data/new.json is absent unless a test serves one. The wheel is the volume unless ✈
+// fly mode is on (Ruling 49): every test that steps places with the wheel turns it on first (e2e/ui.ts).
 const place = (page: Page) => page.evaluate(() => (window as any).__app.place() as number);
 const fire = (page: Page, ev: string) => page.evaluate(e => window.dispatchEvent(new Event(e)), ev);
 const send = (page: Page, m: object) => page.evaluate(msg => (window as any).onPluginMessage(msg), m);
@@ -33,7 +35,12 @@ test('gate, Berlin on the map, wheel walk, station list and favourites, no radio
   const strip = page.locator('#strip');
   await page.goto('/?place=Berlin');
   await expect(page.locator('#start')).toHaveText('Tap to tune in');
-  await expect(page.locator('#gate .hint')).toContainText('wheel: places');
+  await expect(page.locator('#gate .hint')).toContainText('wheel: volume');
+  await expect(page.locator('#gate .hint svg')).toHaveCount(1);   // the ✈ in the hint is the button's icon, not a text glyph
+  for (const b of await page.locator('#gate .hint .line').evaluateAll(ls => ls.map(l => l.getBoundingClientRect()))) {
+    expect(b.left).toBeGreaterThanOrEqual(0);   // each hint line fits the 240 px screen
+    expect(b.right).toBeLessThanOrEqual(240);
+  }
   await page.click('#start');
   await expect(page.locator('#gate')).toBeHidden();
   await expect(strip.locator('.where')).toHaveText(/^Berlin · Germany · \d\d:\d\d$/);
@@ -44,6 +51,7 @@ test('gate, Berlin on the map, wheel walk, station list and favourites, no radio
   expect(await page.evaluate(() => (window as any).__view.current)).toBe(berlin);
   expect(await page.evaluate(() => (window as any).__app.walkSize())).toBeGreaterThan(100);
 
+  await fly(page);
   const step = await page.evaluate(() => {   // read in the same task as the dispatch: before any settle or stream
     window.dispatchEvent(new Event('scrollDown'));
     const text = (sel: string) => document.querySelector(sel)!.textContent;
@@ -97,6 +105,7 @@ test('at globe zoom the wheel only visits places the map shows', async ({ page }
   await tuneIn(page);
   await settled(page);   // the boot flight to the start place would otherwise put its own zoom back
   await page.evaluate(() => { const v = (window as any).__view; v.cam = { ...v.cam, z: 2 }; v.wake(); });
+  await fly(page);
   for (let k = 0; k < 3; k++) {
     const before = await place(page);
     await fire(page, 'scrollDown');
@@ -124,6 +133,7 @@ test('M3 minor M1: a wheel step in the middle of a far flight counts the places 
   await tuneIn(page, `?place=${encodeURIComponent(P.name[start])}`);
   expect(await place(page)).toBe(start);
   await settled(page);
+  await fly(page);   // at rest: the far flight below pauses its countdown
   const lon = ((P.lon[start] + 300) % 360) - 180;   // 120° east: a far flight, the camera dips to the globe
   await page.evaluate(to => (window as any).__view.flyTo(to, 0, 7), lon);
   await page.waitForFunction(() => (window as any).__view.cam.z < 4);
@@ -233,7 +243,7 @@ test('Ruling 44: a transcript naming a place jumps at once, without asking the L
   await expect(where).toHaveText(/^New York City · United States ·/);
   expect(await asks(page)).toBe(0);
 
-  await page.dblclick('#status');
+  await page.click('#binfo');   // Ruling 50: one tap
   const about = page.locator('#about');
   await expect(about).toBeVisible();
   await expect(about.locator('.diag')).toContainText('Voice log');
@@ -263,7 +273,7 @@ test('Ruling 44: a slow LLM reply (20 s) still lands; plain text counts only whe
   await expect(where).toHaveText(/^Berlin ·/);
   await send(page, { message: 'Sure! Taking you to Lisbon. Have fun!', pluginId: 'p' });   // N3: read sentence by sentence
   await expect(where).toHaveText(/^Lisbon · Portugal ·/);
-  await page.dblclick('#status');
+  await page.click('#binfo');
   await expect(page.locator('#about .diag')).toContainText('text without a place: still waiting');
   await expect(page.locator('#about .diag')).toContainText('accepted: Lisbon, PT');
 });
@@ -440,17 +450,17 @@ test('Ruling 45: new stations worldwide from the header row; a pick flies there 
   expect(v.z).toBeGreaterThanOrEqual(7);
 });
 
-test('About: a double tap on the status line shows the credits and the voice log, the wheel scrolls, a tap or side click closes; the tile credit shows over tiles only', async ({ page }) => {
+test('About (Ruling 50): one tap on ⓘ shows the credits and the voice log, the wheel scrolls, a tap or side click closes; the tile credit shows over tiles only', async ({ page }) => {
   const attr = page.locator('#attr');
   const about = page.locator('#about');
   await tuneIn(page);
   await expect(attr).toBeVisible();
   await expect(attr).toHaveText(TILE_SOURCE.attribution);
 
-  await page.click('#status');
-  await expect(about).toBeHidden();   // one tap is not enough
-  await page.waitForTimeout(500);
-  await page.dblclick('#status');
+  await page.dblclick('#status');     // the status double tap is gone
+  await page.waitForTimeout(300);
+  await expect(about).toBeHidden();
+  await page.click('#binfo');         // one tap
   await expect(about).toBeVisible();
   for (const s of ['Radio Browser (public domain)', 'GeoNames (CC BY 4.0)', 'EOX IT Services GmbH', 'Copernicus Sentinel data 2016',
     "NASA's Global Imagery Browse Services (GIBS)"]) await expect(about).toContainText(s);
@@ -458,7 +468,7 @@ test('About: a double tap on the status line shows the credits and the voice log
   await expect(about.locator('.diag')).toContainText('No voice search yet.');
   await page.click('#about');
   await expect(about).toBeHidden();
-  await page.dblclick('#status');
+  await page.click('#binfo');
   await expect(about).toBeVisible();
   const here = await place(page);
   const top = () => about.evaluate(e => e.scrollTop);
@@ -482,13 +492,15 @@ test('About: a double tap on the status line shows the credits and the voice log
   await expect(attr).toBeVisible();
 });
 
-test('M3 minor M7: the longest status line and the tile credit never overlap', async ({ page }) => {
+test('M3 minor M7, Rulings 49 and 50: the longest status line, the tile credit, ✈ ⓘ, the volume bar with its note and the ring never overlap', async ({ page }) => {
   await tuneIn(page);   // no CreationVoiceHandler here: a hold reports "voice unavailable"
   await expect(page.locator('#attr')).toBeVisible();
   await fire(page, 'longPressStart');
   await fire(page, 'longPressEnd');
   await expect(page.locator('#status')).toHaveText('voice unavailable');
-  const boxes = await page.evaluate(() => ['status', 'attr', 'zoom', 'lists', 'strip'].map(id => {
+  await fire(page, 'scrollUp');   // louder at 100 %: the bar at its tallest, with the note
+  await expect(page.locator('#vol .note')).toBeVisible();
+  const boxes = await page.evaluate(() => ['status', 'attr', 'zoom', 'lists', 'strip', 'tools', 'vol', 'ring'].map(id => {
     const r = document.getElementById(id)!.getBoundingClientRect();
     return { id, l: r.left, t: r.top, r: r.right, b: r.bottom };
   }));
@@ -594,6 +606,7 @@ test('Ruling 46: once the map rests, the wheel\'s next and previous places get t
   await page.route('https://tiles.maps.eox.at/**', r => { tiles.push(r.request().url()); return r.fulfill({ path: TILE, contentType: 'image/jpeg' }); });
   await tuneIn(page);
   for (let k = 0; k < 3; k++) { await page.click('#zin'); await settled(page); }   // zoom 10: the neighbours lie off this view
+  await fly(page);
   await fire(page, 'scrollDown');
   await settled(page);
   const mark = tiles.length;
@@ -606,4 +619,220 @@ test('Ruling 46: once the map rests, the wheel\'s next and previous places get t
   console.log(`neighbour prefetch: ${extra.length} tiles beyond the ${mine.size} of the view`);
   expect(extra.length).toBeGreaterThan(0);
   expect(extra.length).toBeLessThanOrEqual(2 * NEIGHBOUR_PREFETCH);
+});
+
+const volume = (page: Page) => page.evaluate(() => (window as any).__app.audio().volume as number);
+const cam = (page: Page) => page.evaluate(() => ({ ...(window as any).__view.cam, current: (window as any).__view.current }));
+
+test('Ruling 49: the wheel is the volume, 5 % per event, the bar reads the element back, and the map never moves', async ({ page }) => {
+  const bar = page.locator('#vol');
+  await tuneIn(page);
+  await expect(page.locator('#strip .name')).toHaveClass(/live/);
+  await settled(page);
+  const here = await place(page), view = await cam(page);
+  expect(await volume(page)).toBe(1);   // 100 % on the first run
+  await expect(page.locator('#bfly')).not.toHaveClass(/\bon\b/);
+
+  await fire(page, 'scrollUp');   // louder at 100 %: the note that the r1's own volume sets the maximum
+  await expect(bar).toBeVisible();
+  await expect(bar.locator('.pct')).toHaveText('100 %');
+  await expect(bar.locator('.note')).toHaveText("The r1's own volume sets the maximum.");
+  expect(await volume(page)).toBe(1);
+
+  for (let k = 0; k < 8; k++) await fire(page, 'scrollDown');   // softer: 100 → 60
+  expect(await volume(page)).toBeCloseTo(0.6, 5);
+  await expect(bar.locator('.pct')).toHaveText('60 %');
+  await expect(bar.locator('.note')).toBeHidden();
+  expect(await bar.locator('.fill').evaluate(e => (e as HTMLElement).style.width)).toBe('60%');
+  expect(await place(page)).toBe(here);
+  expect(await cam(page)).toEqual(view);   // not a pixel of map movement
+  expect(await page.evaluate(() => (window as any).__view.moving)).toBe(false);
+
+  // The bar shows what the element reads back, not what was set: a WebView that ignores the setter shows up.
+  await page.evaluate(() => {
+    const w = window as any, P = HTMLMediaElement.prototype;
+    w.__volume = Object.getOwnPropertyDescriptor(P, 'volume');
+    Object.defineProperty(P, 'volume', { configurable: true, get() { return 1; }, set(v) { w.__volume.set.call(this, v); } });
+  });
+  await fire(page, 'scrollDown');   // 55 % set, 100 % read back
+  await expect(bar.locator('.pct')).toHaveText('100 %');
+  await page.evaluate(() => Object.defineProperty(HTMLMediaElement.prototype, 'volume', (window as any).__volume));
+  expect(await volume(page)).toBeCloseTo(0.55, 5);
+
+  for (let k = 0; k < 25; k++) await fire(page, 'scrollDown');   // down to 0 and no further
+  expect(await volume(page)).toBe(0);
+  await expect(bar.locator('.pct')).toHaveText('muted');
+  await page.waitForTimeout(VOLUME_SHOW_MS + 300);
+  await expect(bar).toBeHidden();
+});
+
+test('Ruling 49: ✈ lights up and the wheel steps places; a flight pauses the countdown; FLY_MS of rest later the wheel is the volume again', async ({ page }) => {
+  const btn = page.locator('#bfly');
+  await tuneIn(page);
+  await expect(page.locator('#strip .name')).toHaveClass(/live/);
+  await settled(page);
+  const berlin = await place(page);
+
+  await page.click('#bfly');
+  await expect(btn).toHaveClass(/\bon\b/);
+  await expect(btn).toHaveAttribute('aria-pressed', 'true');
+  const tapped = Date.now();
+  // A far flight right after the tap (2.6 s at the antipode): the countdown only runs while the map rests.
+  await page.evaluate(() => { const v = (window as any).__view; v.flyTo(v.cam.lon > 0 ? v.cam.lon - 180 : v.cam.lon + 180, -v.cam.lat, v.cam.z); });
+  await settled(page);
+  await page.waitForTimeout(1000);
+  expect(Date.now() - tapped).toBeGreaterThan(FLY_MS + 500);
+  await expect(btn).toHaveClass(/\bon\b/);   // 3.6 s after the tap, but only about 1 s of rest
+
+  await fire(page, 'scrollDown');   // the wheel steps from Berlin (a flight to a place keeps it selected) to its neighbour
+  await expect.poll(() => place(page)).not.toBe(berlin);
+  expect(await volume(page)).toBe(1);   // the volume did not move
+  await expect(page.locator('#vol')).toBeHidden();
+  await settled(page);
+  const landed = Date.now();
+  await expect(btn).not.toHaveClass(/\bon\b/, { timeout: FLY_MS + 2000 });
+  const rest = Date.now() - landed;
+  expect(rest).toBeGreaterThan(FLY_MS - 250);   // counted from the landing, not from the step (at most FLY_MS + 2 s: the timeout)
+  await expect(btn).toHaveAttribute('aria-pressed', 'false');
+
+  const at = await place(page);
+  await fire(page, 'scrollDown');   // the volume again
+  expect(await volume(page)).toBeCloseTo(0.95, 5);
+  expect(await place(page)).toBe(at);
+});
+
+test('Ruling 49: a second ✈ tap ends fly mode at once; the station list, a worldwide list, About and a voice hold end it too', async ({ page }) => {
+  const btn = page.locator('#bfly');
+  const on = () => expect(btn).toHaveClass(/\bon\b/);
+  const off = () => expect(btn).not.toHaveClass(/\bon\b/);
+  await tuneIn(page);
+  await expect(page.locator('#strip .name')).toHaveClass(/live/);
+  await settled(page);
+  const here = await place(page);
+
+  await page.click('#bfly');
+  await on();
+  await page.click('#bfly');
+  await off();
+  await fire(page, 'scrollDown');
+  expect(await volume(page)).toBeCloseTo(0.95, 5);
+  expect(await place(page)).toBe(here);
+
+  await fly(page);
+  await page.click('#strip');       // the station list
+  await expect(page.locator('#list')).toBeVisible();
+  await off();
+  await page.click('#list');
+
+  await fly(page);
+  await page.click('#bfav');        // a worldwide list
+  await expect(page.locator('#list')).toBeVisible();
+  await off();
+  await page.click('#list');
+
+  await fly(page);
+  await page.click('#binfo');       // About
+  await expect(page.locator('#about')).toBeVisible();
+  await off();
+  await page.click('#about');
+
+  await fly(page);
+  await fire(page, 'longPressStart');   // a voice hold (no voice here: "voice unavailable")
+  await fire(page, 'longPressEnd');
+  await off();
+  await fire(page, 'scrollDown');
+  expect(await volume(page)).toBeCloseTo(0.9, 5);
+  expect(await place(page)).toBe(here);
+});
+
+test('Ruling 49: the volume holds for every stream (the element keeps it when src changes) and across a reload', async ({ page }) => {
+  await tuneIn(page);
+  await expect(page.locator('#strip .name')).toHaveClass(/live/);
+  for (let k = 0; k < 7; k++) await fire(page, 'scrollDown');   // 65 %
+  expect(await volume(page)).toBeCloseTo(0.65, 5);
+  const before = (await page.evaluate(() => (window as any).__app.audio())).src as string;
+
+  await fly(page);
+  await fire(page, 'scrollDown');   // another place, another stream
+  await expect(page.locator('#strip .name')).toHaveClass(/live/);
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__app.audio())).src).not.toBe(before);
+  expect(await volume(page)).toBeCloseTo(0.65, 5);   // src changed, the volume stayed
+
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('volume')), { timeout: VOLUME_SAVE_MS + 2000 }).toBe('65');
+  await page.reload();
+  await page.waitForFunction(() => (window as any).__app);
+  expect(await volume(page)).toBeCloseTo(0.65, 5);   // applied at boot, before the gate
+  await page.click('#start');
+  await expect(page.locator('#strip .name')).toHaveClass(/live/);
+  expect(await volume(page)).toBeCloseTo(0.65, 5);
+  await fire(page, 'scrollUp');
+  await expect(page.locator('#vol .pct')).toHaveText('70 %');
+});
+
+test('Ruling 49: reopened at 0 %, the status line reads "live · muted" and the bar says muted; one step louder clears both', async ({ page }) => {
+  const status = page.locator('#status');
+  await tuneIn(page);
+  await expect(page.locator('#strip .name')).toHaveClass(/live/);
+  await expect(status).toHaveText('live');
+  for (let k = 0; k < 20; k++) await fire(page, 'scrollDown');   // 100 → 0
+  expect(await volume(page)).toBe(0);
+  await expect(status).toHaveText('live · muted');   // at once, not at the next minute
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('volume')), { timeout: VOLUME_SAVE_MS + 2000 }).toBe('0');
+
+  await page.reload();
+  await page.waitForFunction(() => (window as any).__app);
+  expect(await volume(page)).toBe(0);
+  await page.click('#start');
+  await expect(page.locator('#strip .name')).toHaveClass(/live/);   // it plays, silently: the screen must say so
+  await expect(status).toHaveText('live · muted');
+  await expect(page.locator('#vol')).toBeVisible();   // shown at the start without a wheel event
+  await expect(page.locator('#vol .pct')).toHaveText('muted');
+
+  // Layout probe: the longest statuses "muted" makes stay clear of ✈ ⓘ (the text is restored in the same task).
+  const clear = await page.evaluate(() => {
+    const st = document.getElementById('status')!, tools = document.getElementById('tools')!.getBoundingClientRect();
+    const was = st.textContent;
+    const right = ['live · muted', 'tuning… · muted', 'no signal · muted'].map(t => { st.textContent = t; return st.getBoundingClientRect().right; });
+    st.textContent = was;
+    return right.map(r => r <= tools.left);
+  });
+  expect(clear).toEqual([true, true, true]);
+
+  await fire(page, 'scrollUp');
+  expect(await volume(page)).toBeCloseTo(0.05, 5);
+  await expect(status).toHaveText('live');
+  await expect(page.locator('#vol .pct')).toHaveText('5 %');
+});
+
+test.describe('touch (Rulings 49, 50)', () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  test('a finger tap on ✈ turns fly mode on and off, and one on ⓘ opens About', async ({ page }) => {
+    const tap = async (sel: string) => {
+      const b = (await page.locator(sel).boundingBox())!;
+      expect(b.width).toBeGreaterThanOrEqual(26);
+      expect(b.height).toBeGreaterThanOrEqual(26);
+      await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+    };
+    await page.goto('/?place=Berlin');
+    await tap('#start');
+    await expect(page.locator('#gate')).toBeHidden();
+    await expect(page.locator('#strip .name')).toHaveClass(/live/);
+    await settled(page);
+    const here = await place(page);
+    expect((await page.locator('#bfly').boundingBox())!.width).toBeGreaterThanOrEqual(30);
+
+    await tap('#bfly');
+    await expect(page.locator('#bfly')).toHaveClass(/\bon\b/);
+    await fire(page, 'scrollDown');
+    await expect.poll(() => place(page)).not.toBe(here);
+    await tap('#bfly');
+    await expect(page.locator('#bfly')).not.toHaveClass(/\bon\b/);
+
+    await tap('#binfo');
+    await expect(page.locator('#about')).toBeVisible();
+    await tap('#about');
+    await expect(page.locator('#about')).toBeHidden();
+    await expect(page.locator('#list')).toBeHidden();   // the taps went to the buttons, not to the strip or the map
+  });
 });

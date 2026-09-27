@@ -8,7 +8,7 @@ import { FAV_HEADER, NEW_HEADER, newList, placeList } from '../../src/ui/news';
 import { createMatcher } from '../../src/voice/match';
 import {
   ABOUT, ABOUT_HINT, ABOUT_TITLE, DIAG_EMPTY, DIAG_TITLE, EMPTY_FAVS, EMPTY_NEW, FAV_HINT, HINT, LIST_HINT, NOTE, countryName,
-  doubleTap, lastOf, listTitle, listView, localTime, msToNextMinute, placeForIntent, playable, sharePlayer, startPlace,
+  lastOf, listTitle, listView, localTime, msToNextMinute, placeForIntent, playable, sharePlayer, startPlace,
   stationCount, statusText, stripModel, viewport, whereLine,
 } from '../../src/app/logic';
 
@@ -123,7 +123,12 @@ describe('text', () => {
     const all = [...HINT, LIST_HINT, FAV_HINT, EMPTY_NEW, EMPTY_FAVS, ...Object.values(NOTE), ABOUT_TITLE, ...ABOUT, ABOUT_HINT,
       DIAG_TITLE, DIAG_EMPTY, 'tuning…', 'live', 'no signal'];
     for (const t of all) expect(t.toLowerCase()).not.toContain('garden');
-    expect(HINT.join(' · ')).toBe('wheel: places · side: play/stop · hold: voice · drag: move the map · tap the strip: stations');
+    expect(HINT.join(' · ')).toBe('wheel: volume · side: play/stop · ✈ then wheel: places · hold: voice · tap the strip: stations');
+  });
+
+  it('teaches the controls in three short lines under the gate (Ruling 49)', () => {
+    expect(HINT).toHaveLength(3);
+    for (const line of HINT) expect(line.length).toBeLessThanOrEqual(36);
   });
 
   it('credits every data and imagery source on the About screen (A.8)', () => {
@@ -171,6 +176,21 @@ describe('strip model', () => {
 
   it('lets a note override the player status', () => {
     expect(stripModel(places, 0, 'playing', null, NOTE.listening, at).status).toBe(NOTE.listening);
+  });
+
+  it('adds "muted" to the status while the volume is 0, so a radio reopened at 0 % never looks live and silent', () => {
+    const m = stripModel(places, 0, 'playing', row('dlf', 0), '', at, true);
+    expect(m).toEqual({ status: 'live · muted', name: 'DLF', where: 'Berlin · Germany · 14:34', live: true, ring: 'live' });
+    expect(stripModel(places, 2, 'loading', row('dlf', 0), '', at, true).status).toBe('tuning… · muted');
+    expect(stripModel(places, 0, 'error', null, '', at, true).status).toBe('no signal · muted');
+    expect(stripModel(places, 0, 'idle', row('dlf', 0), '', at, true).status).toBe('muted');
+    expect(stripModel(places, -1, 'idle', null, '', at, true).status).toBe('muted');
+    expect(stripModel(places, 0, 'playing', row('dlf', 0), '', at, false).status).toBe('live');
+  });
+
+  it('lets a note win over "muted" (a long note plus "muted" could reach the ✈ button)', () => {
+    expect(stripModel(places, 0, 'playing', null, NOTE.noVoice, at, true).status).toBe(NOTE.noVoice);
+    expect(stripModel(places, -1, 'idle', null, NOTE.noPlace, at, true).status).toBe(NOTE.noPlace);
   });
 });
 
@@ -229,23 +249,6 @@ describe('list view', () => {
     expect(v.rows).toEqual([{ i: 0, name: 'F — Berlin, DE', fav: false, sel: true, head: false }]);
     expect(v.hint).toBe(FAV_HINT);
     expect(listView(newList([]), new Set(), '', 'new').hint).toBe(LIST_HINT);
-  });
-});
-
-describe('double tap', () => {
-  it('fires on a second tap within 400 ms and 24 px', () => {
-    const tap = doubleTap();
-    expect(tap(1000, 10, 10)).toBe(false);
-    expect(tap(1300, 20, 14)).toBe(true);
-  });
-
-  it('ignores slow or distant second taps, and starts over after a double tap', () => {
-    const tap = doubleTap();
-    expect(tap(0, 10, 10)).toBe(false);
-    expect(tap(500, 10, 10)).toBe(false);   // too slow: this becomes the first tap
-    expect(tap(700, 60, 10)).toBe(false);   // too far: this becomes the first tap
-    expect(tap(900, 62, 12)).toBe(true);
-    expect(tap(1000, 62, 12)).toBe(false);  // a third tap starts a new pair
   });
 });
 
