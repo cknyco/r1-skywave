@@ -1,31 +1,10 @@
 {
-  "added": 3,
+  "added": 0,
   "baseline": false,
-  "byCountry": {
-    "AR": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "BE": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "PE": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "TR": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    }
-  },
+  "byCountry": {},
   "changed": 0,
-  "date": "2026-10-03",
-  "removed": 1,
+  "date": "2026-10-04",
+  "removed": 0,
   "total": 7983,
   "v": 1
 }
