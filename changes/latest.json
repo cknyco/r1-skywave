@@ -1,10 +1,16 @@
 {
-  "added": 0,
+  "added": 1,
   "baseline": false,
-  "byCountry": {},
+  "byCountry": {
+    "US": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    }
+  },
   "changed": 0,
-  "date": "2026-10-04",
+  "date": "2026-10-05",
   "removed": 0,
-  "total": 7983,
+  "total": 7984,
   "v": 1
 }
