@@ -1,221 +1,66 @@
 {
-  "added": 185,
+  "added": 18,
   "baseline": false,
   "byCountry": {
-    "AR": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "AT": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
     "AU": {
-      "added": 32,
-      "changed": 0,
-      "removed": 0
-    },
-    "BD": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "BO": {
+    "BG": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "BR": {
-      "added": 23,
-      "changed": 0,
-      "removed": 0
-    },
-    "BS": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "CA": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "CH": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "CL": {
-      "added": 4,
+      "added": 1,
       "changed": 0,
       "removed": 0
     },
     "CO": {
-      "added": 2,
-      "changed": 1,
-      "removed": 0
-    },
-    "CU": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "DE": {
-      "added": 4,
-      "changed": 0,
-      "removed": 3
-    },
-    "DZ": {
-      "added": 22,
-      "changed": 0,
-      "removed": 0
-    },
-    "EC": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "EE": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "ES": {
-      "added": 3,
+      "added": 2,
       "changed": 0,
       "removed": 0
     },
     "FR": {
-      "added": 3,
-      "changed": 0,
-      "removed": 0
-    },
-    "GB": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "GR": {
-      "added": 2,
-      "changed": 0,
-      "removed": 0
-    },
-    "GU": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "HU": {
-      "added": 3,
-      "changed": 0,
-      "removed": 0
-    },
-    "ID": {
-      "added": 4,
-      "changed": 0,
-      "removed": 0
-    },
-    "IE": {
-      "added": 2,
-      "changed": 0,
-      "removed": 0
-    },
-    "IN": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "IT": {
-      "added": 2,
-      "changed": 0,
-      "removed": 0
-    },
-    "LT": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "MX": {
-      "added": 9,
-      "changed": 3,
-      "removed": 9
-    },
-    "NL": {
-      "added": 4,
-      "changed": 0,
-      "removed": 2
-    },
-    "NZ": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "PE": {
-      "added": 2,
-      "changed": 0,
-      "removed": 1
-    },
-    "PL": {
-      "added": 4,
-      "changed": 0,
-      "removed": 0
-    },
-    "PT": {
-      "added": 3,
-      "changed": 0,
-      "removed": 0
-    },
-    "RO": {
-      "added": 3,
-      "changed": 0,
-      "removed": 2
-    },
-    "RU": {
-      "added": 3,
-      "changed": 0,
-      "removed": 0
-    },
-    "SE": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "TH": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "TR": {
-      "added": 3,
-      "changed": 0,
-      "removed": 0
-    },
-    "UA": {
+    "MA": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "US": {
-      "added": 31,
+      "added": 7,
       "changed": 0,
-      "removed": 3
+      "removed": 0
     },
-    "VE": {
-      "added": 2,
-      "changed": 0,
-      "removed": 1
-    },
-    "ZA": {
+    "VG": {
       "added": 1,
       "changed": 0,
       "removed": 0
     }
   },
-  "changed": 4,
-  "date": "2026-10-13",
-  "removed": 25,
-  "total": 8357,
+  "changed": 0,
+  "date": "2026-10-14",
+  "removed": 0,
+  "total": 8375,
   "v": 1
 }
