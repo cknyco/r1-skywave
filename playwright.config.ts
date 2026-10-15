@@ -7,5 +7,5 @@ export default defineConfig({
     baseURL: 'http://localhost:8240', viewport: { width: 240, height: 292 }, deviceScaleFactor: 2,
     headless: true, launchOptions: { args: ['--mute-audio'] },   // never a visible or audible browser
   },
-  webServer: { command: 'npm run dev', url: 'http://localhost:8240', reuseExistingServer: true },
+  webServer: { command: 'pnpm run dev', url: 'http://localhost:8240', reuseExistingServer: true },
 });

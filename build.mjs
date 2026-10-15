@@ -21,7 +21,7 @@ function copyStatic(appSrc) {
   mkdirSync(out, { recursive: true });
   if (existsSync('public')) cpSync('public', out, { recursive: true });
   if (existsSync('probe')) {
-    if (!existsSync(QR_LIB)) throw new Error(`${QR_LIB} is missing: run npm install`);
+    if (!existsSync(QR_LIB)) throw new Error(`${QR_LIB} is missing: run pnpm install`);
     cpSync('probe', `${out}/probe`, { recursive: true });
     cpSync(QR_LIB, `${out}/probe/qrcode.js`);
   }

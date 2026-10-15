@@ -28,10 +28,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: git fetch --depth=1 origin data-log:refs/remotes/origin/data-log || true
+      # pnpm only (package.json devEngines): the version that wrote pnpm-lock.yaml and reads allowBuilds.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0 (third-party: pinned to a commit)
+        with: { version: 11.5.2 }
       - uses: actions/setup-node@v7
-        with: { node-version: 24, cache: npm }
-      - run: npm ci
-      - run: npm run typecheck
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
       # GeoNames cities15000 (place names) and admin1CodesASCII (regions, Ruling 51), downloaded once.
       - uses: actions/cache@v6
         with: { path: .cache, key: geonames-cities15000-admin1-v2 }
@@ -41,21 +44,21 @@ jobs:
           git show origin/data-log:snapshot.json > log/prev-snapshot.json || rm -f log/prev-snapshot.json
           git show origin/data-log:day-base.json > log/prev-day-base.json || rm -f log/prev-day-base.json
       - id: data
-        run: npm run data
+        run: pnpm run data
         env: { PREV_SNAPSHOT: log/prev-snapshot.json }
         continue-on-error: true
       - if: steps.data.outcome == 'failure'
         run: |
           echo "::warning::Radio Browser build failed — deploying the last live dataset"
-          npm run data:live
+          pnpm run data:live
           curl -fsS --retry 2 https://cknyco.github.io/r1-skywave/data/new.json -o "$RUNNER_TEMP/new.json" \
             && mv "$RUNNER_TEMP/new.json" public/data/new.json || echo "no live new.json to keep"
       - if: steps.data.outcome == 'success'
         run: |
-          npm run changelog -- --data public/data --prev log/prev-snapshot.json --day-base log/prev-day-base.json \
+          pnpm run changelog --data public/data --prev log/prev-snapshot.json --day-base log/prev-day-base.json \
             --log log --date "$(date -u +%F)"
-      - run: npm run build
-      - run: npm test
+      - run: pnpm run build
+      - run: pnpm test
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with: { path: dist }
