@@ -1,5 +1,5 @@
 import { distanceKm } from '../../src/geo/sphere';
-import type { Gazetteer } from './gazetteer';
+import { BIG_CITY_KM, BIG_CITY_POP, type City, type Gazetteer } from './gazetteer';
 import type { Place } from './places';
 
 export interface PlacesJson {
@@ -29,7 +29,32 @@ function majority<T>(xs: T[]): T {
   return best;
 }
 
-export function emit(places: Place[], gazetteer: Gazetteer, v: string) {
+// Ruling 51: a place most of whose stations name a city in their `state` takes that city's name when the city is
+// more populous than the gazetteer's pick and near: within LISTED_CITY_KM, or within BIG_CITY_KM for a city of
+// BIG_CITY_POP or more (as the big-city rule allows). Stations placed at Thessaloníki join a place anchored in
+// Kalamariá, 4.5 km out, and 67 of its 70 stations say Thessaloniki; four stations at Bur Dubai, two of which say
+// Dubai and none anything else, lie 19.4 km from GeoNames' Dubai point and 13.3 km from Sharjah. "Name" means
+// CityPlacer.cityOf, so a state that is also a region names its city only as placement allows: Guarulhos stays
+// Guarulhos although its stations say São Paulo. Stations without a state do not count; states naming no city count
+// against (Ludwigshafen, 3 of 15 for Mannheim, keeps its name).
+export const LISTED_CITY_KM = 10;
+
+/** The city the `state` of more than half of a place's stations that give one names, if any. */
+function listedCity(p: Place, cc: string, cityOf: (cc: string, state: string) => City | null): City | null {
+  const votes = new Map<City, number>();
+  let voters = 0;
+  for (const s of p.stations) {
+    if (!s.state) continue;
+    voters++;
+    const c = cityOf(cc, s.state);
+    if (c) votes.set(c, (votes.get(c) ?? 0) + 1);
+  }
+  for (const [c, n] of votes) if (n * 2 > voters) return c;
+  return null;
+}
+
+/** `cityOf`: the city a state names in a country, if any (CityPlacer.cityOf); without it the gazetteer alone names places. */
+export function emit(places: Place[], gazetteer: Gazetteer, v: string, cityOf?: (cc: string, state: string) => City | null) {
   const out: PlacesJson = { v, lat: [], lon: [], count: [], name: [], cc: [], tzi: [], tzs: [] };
   const tzIndex = new Map<string, number>();
   const chunks = new Map<string, ChunkJson>();
@@ -39,7 +64,10 @@ export function emit(places: Place[], gazetteer: Gazetteer, v: string) {
   const byCity = new Map<string, number[]>();
   for (const p of places) {
     const cc = majority(p.stations.map(s => s.cc));
-    const city = gazetteer.nearest(p.lat, p.lon, cc);
+    const near = gazetteer.nearest(p.lat, p.lon, cc);
+    const listed = cityOf ? listedCity(p, cc, cityOf) : null;
+    const city = listed && (!near || listed.pop > near.pop)
+      && distanceKm(p.lon, p.lat, listed.lon, listed.lat) <= (listed.pop >= BIG_CITY_POP ? BIG_CITY_KM : LISTED_CITY_KM) ? listed : near;
     const wide = city ?? gazetteer.nearest(p.lat, p.lon, cc, 250);
     const state = majority(p.stations.map(s => s.state).filter(Boolean));
     const name = city?.name ?? state ?? (wide ? `near ${wide.name}` : cc);

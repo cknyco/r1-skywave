@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { discoverServers, fetchGeoStations } from '../../scripts/lib/radiobrowser';
+import { discoverServers, fetchStations } from '../../scripts/lib/radiobrowser';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -17,14 +17,24 @@ describe('radiobrowser', () => {
       calls++;
       return calls < 3 ? new Response('bad gateway', { status: 502 }) : json([{ stationuuid: 'x' }]);
     };
-    const rows = await fetchGeoStations(f as typeof fetch, async () => {});
+    const rows = await fetchStations(f as typeof fetch, async () => {});
     expect(rows).toEqual([{ stationuuid: 'x' }]);
     expect(calls).toBe(3);
+  });
+
+  it('asks for every working station, with coordinates or without (Ruling 51)', async () => {
+    const urls: string[] = [];
+    const f = async (url: string) => {
+      urls.push(url);
+      return url.endsWith('/json/servers') ? json([{ name: 'de1.api.radio-browser.info' }]) : json([]);
+    };
+    await fetchStations(f as typeof fetch, async () => {});
+    expect(urls[1]).toBe('https://de1.api.radio-browser.info/json/stations/search?hidebroken=true&limit=100000');
   });
 
   it('gives up after 5 failed attempts', async () => {
     const f = async (url: string) =>
       url.endsWith('/json/servers') ? json([{ name: 'de1.api.radio-browser.info' }]) : new Response('x', { status: 502 });
-    await expect(fetchGeoStations(f as typeof fetch, async () => {})).rejects.toThrow(/after 5 attempts/);
+    await expect(fetchStations(f as typeof fetch, async () => {})).rejects.toThrow(/after 5 attempts/);
   });
 });

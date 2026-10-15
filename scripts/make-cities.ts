@@ -1,9 +1,10 @@
 // Ruling 44: writes src/voice/cities.ts, the world's big cities for the voice fast path (src/voice/match.ts): every
 // place of 1 million people or more, and every capital, from GeoNames cities15000 (CC BY 4.0), the file the data build
-// names places with. The matcher needs them because the dataset names a place after the town its stations sit in:
-// Tokyo's stations are "Aoi", "Yokohama" and "Fujisawa", and "New York" is a one-station place upstate while the
-// city's stations are "New York City". Districts (PPLX) and historical, abandoned or destroyed places are left out, as
-// in scripts/lib/gazetteer.ts. Run it by hand after `npm run data` has cached the GeoNames file: `npm run cities`.
+// names places with. The matcher needs them because the dataset names a place after the town its stations sit in, or
+// after a city of a million people within 20 km (Ruling 51): "New York" is a one-station place upstate while the
+// city's stations are "New York City", and a city with no stations nearby is found by its coordinates. Districts
+// (PPLX) and historical, abandoned or destroyed places are left out, as in scripts/lib/gazetteer.ts. Run it by hand
+// after `npm run data` has cached the GeoNames file: `npm run cities`.
 // The output is committed, so neither CI nor the nightly build needs the file for it.
 import { readFileSync, writeFileSync } from 'node:fs';
 

@@ -1,0 +1,4 @@
+# von macbook-pnpm.sh: Pakete, deren Build-Skripte schon unter npm liefen (laut alter package-lock.json)
+allowBuilds:
+  "esbuild": true
+  "fsevents": true

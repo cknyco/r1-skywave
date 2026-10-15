@@ -18,7 +18,8 @@ export interface RBStation {
 
 export const USER_AGENT = 'skywave-build/0.1';
 const SEEDS = ['https://all.api.radio-browser.info', 'https://de1.api.radio-browser.info'];
-const QUERY = '/json/stations/search?has_geo_info=true&hidebroken=true&limit=100000';
+// Every working station, with coordinates or without (Ruling 51: 12,760 + 46,725 rows on 2026-09-26/27, about 70 MB).
+const QUERY = '/json/stations/search?hidebroken=true&limit=100000';
 
 type Sleep = (ms: number) => Promise<void>;
 const realSleep: Sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -38,7 +39,7 @@ export async function discoverServers(fetchFn: typeof fetch = fetch): Promise<st
   return ['https://de1.api.radio-browser.info'];
 }
 
-export async function fetchGeoStations(fetchFn: typeof fetch = fetch, sleep: Sleep = realSleep): Promise<RBStation[]> {
+export async function fetchStations(fetchFn: typeof fetch = fetch, sleep: Sleep = realSleep): Promise<RBStation[]> {
   const servers = await discoverServers(fetchFn);
   let lastError = '';
   for (let attempt = 0; attempt < 5; attempt++) {

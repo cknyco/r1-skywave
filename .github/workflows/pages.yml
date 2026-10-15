@@ -32,8 +32,9 @@ jobs:
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run typecheck
+      # GeoNames cities15000 (place names) and admin1CodesASCII (regions, Ruling 51), downloaded once.
       - uses: actions/cache@v6
-        with: { path: .cache, key: geonames-cities15000-v1 }
+        with: { path: .cache, key: geonames-cities15000-admin1-v2 }
       - name: Previous snapshot and day base from branch data-log (read-only; missing on the first run)
         run: |
           mkdir -p log
@@ -101,8 +102,10 @@ jobs:
           if [ "$found" -eq 0 ]; then
             git fetch -q --depth=1 origin data-log
             git checkout -q -B data-log FETCH_HEAD
-            # A v1 snapshot (before Task 8c) is replaced once by the format-upgrade baseline (Ruling 42).
+            # A v1 snapshot (before Task 8c) is replaced once by the format-upgrade baseline (Ruling 42), a snapshot
+            # of older rules (none: 1) once by the data-upgrade baseline (Ruling 51).
             if [ "$baseline" = true ] && [ -f snapshot.json ] && [ "$(jq -r .v snapshot.json)" != 1 ] \
+              && [ "$(jq -r '.rules // 1' snapshot.json)" -ge "$(jq -r '.rules // 1' "$log/snapshot.json")" ] \
               && [ "$(jq -r .baseline snapshot.json)" != "$(jq -r .baseline "$log/snapshot.json")" ]; then
               echo "::error::the build started a new baseline (previous snapshot missing or unreadable), but data-log already has one; not replacing it"
               exit 1
@@ -117,7 +120,7 @@ jobs:
 
           Written by the `pages` workflow after each build with fresh station data; never merged into `main`.
 
-          - `snapshot.json`: every station in the deployed dataset, keyed by Radio Browser uuid, with name, place, country, the date it was first seen and a short hash of its stream URL.
+          - `snapshot.json`: every station in the deployed dataset, keyed by Radio Browser uuid, with name, place, country, the date it was first seen and a short hash of its stream URL; `rules` is the version of the rules the dataset was built by, and a change starts a new baseline.
           - `day-base.json`: the last snapshot of the previous UTC day.
           - `changes/YYYY-MM-DD.md`: stations added, removed and changed (the same stream under a new uuid: renamed, moved or re-listed) since the end of the previous day. Later runs on the same day replace it; a day whose changes cancel out has none.
           - `changes/latest.json`: the counts behind the latest day file.

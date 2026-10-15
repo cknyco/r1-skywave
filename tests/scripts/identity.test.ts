@@ -9,6 +9,11 @@ import type { RBStation } from '../../scripts/lib/radiobrowser';
 
 // Ruling 39: Radio Browser's clickcount is a 24-hour count, mostly 0-2, that changes from run to run. Which
 // listing keeps a stream, which channels of a broadcaster stay and where a place is anchored must not depend on it.
+//
+// The seeded loops below take about a second under a full parallel run, and once took more than vitest's default
+// 5 s on a loaded machine. This file runs in the nightly Pages job, where a timeout would block the deploy, so they
+// have SLOW (30 s) instead.
+const SLOW = 30_000;
 
 /** mulberry32: a small seeded generator, so a failing case names its seed. */
 function random(seed: number): () => number {
@@ -106,7 +111,7 @@ describe('station identity under clickcount churn', () => {
         expect(normalize(rerun(rows, seed), opts).map(s => s.id).sort(), `world ${w}, seed ${seed}`).toEqual(ids);
       }
     }
-  });
+  }, SLOW);
 
   it('keeps the listing the previous snapshot had, even against more votes', () => {
     const rows = world(4);
@@ -118,7 +123,7 @@ describe('station identity under clickcount churn', () => {
       const ids = normalize(rerun(voted, seed), { ...opts, prefer: new Set([known]) }).map(s => s.id);
       expect(ids.filter(id => twins.includes(id)), `seed ${seed}`).toEqual([known]);
     }
-  });
+  }, SLOW);
 
   it('anchors places and caps broadcasters the same way on every run', () => {
     for (const w of [1, 2, 3]) {
@@ -130,7 +135,7 @@ describe('station identity under clickcount churn', () => {
         expect(shape(capFamilies(aggregate(again))), `world ${w}, seed ${seed}`).toEqual(reference);
       }
     }
-  });
+  }, SLOW);
 
   it('yields the same snapshot from runs that differ only in clicks and row order', () => {
     for (const w of [1, 2, 3]) {
@@ -141,7 +146,7 @@ describe('station identity under clickcount churn', () => {
         expect(build(rerun(world(w), seed), known), `world ${w}, seed ${seed}, sticky`).toEqual(first);
       }
     }
-  });
+  }, SLOW);
 });
 
 // Ruling 42: a listing that fails one check leaves its stream and its broadcaster slot to a stand-in. It is in
@@ -194,5 +199,133 @@ describe('station identity when listings fail a check for one run', () => {
       }
     }
     expect(standIns).toBeGreaterThan(0);
+  }, SLOW);
+});
+
+// Ruling 51: a station without coordinates sits at the city its state names. A row with coordinates wins a shared
+// stream whatever the votes, the uuid or the previous snapshot say. For anchors and broadcaster slots the previous
+// snapshot comes first, as before, and between two stations it has (or two it has not) the one with coordinates;
+// between two of a kind the rest is unchanged.
+describe('station identity with rows placed by their city', () => {
+  const place = (cc: string, state: string) => {
+    const c = CITIES.find(x => x.cc === cc && x.name === state);
+    return c ? { lat: c.lat, lon: c.lon } : null;
+  };
+  const placedOpts = { ...opts, place };
+
+  /** world(seed) plus listings without coordinates: a third of the streams again, voted up, and ten streams of their own. */
+  function placedWorld(seed: number): RBStation[] {
+    const r = random(seed + 500);
+    const hex = () => Math.floor(r() * 0xffffffff).toString(16).padStart(8, '0');
+    const rows = world(seed);
+    const noGeo = (url: string, cc: string, state: string, name: string): RBStation => ({
+      stationuuid: `${hex()}-${hex()}`, name, url_resolved: url, countrycode: cc, state, geo_lat: null, geo_long: null,
+      codec: 'MP3', bitrate: 128, hls: 0, lastcheckok: 1, ssl_error: 0, clickcount: Math.floor(r() * 4), votes: 3 + Math.floor(r() * 5), tags: '',
+    });
+    const extra: RBStation[] = [];
+    for (const url of [...new Set(rows.map(row => row.url_resolved))]) {
+      const cc = rows.find(row => row.url_resolved === url)!.countrycode;
+      if (r() < 0.33) extra.push(noGeo(url, cc, cc === 'CL' ? 'Quillota' : r() < 0.5 ? 'Leipzig' : 'Gera', `Placed ${url}`));
+    }
+    for (let k = 0; k < 10; k++) extra.push(noGeo(`https://own${k}.example.net/live`, 'DE', ['Leipzig', 'Gera', 'Saxony', ''][k % 4], `Own ${k}`));
+    return [...rows, ...extra];
+  }
+
+  function nightPlaced(rows: RBStation[], day: string, prev: Snapshot | null): Snapshot {
+    const { places } = stationPlaces(rows, { ...placedOpts, prefer: prev ? preferredIds(prev) : new Set() });
+    const { placesJson, chunks } = emit(places, gazetteer, day);
+    return snapshotFrom(placesJson, chunks, day, prev);
+  }
+
+  it('keeps the row with coordinates of every shared stream, and the same snapshot whatever the clicks and row order', () => {
+    for (const w of [1, 2, 3]) {
+      const rows = placedWorld(w);
+      const geoUrls = new Set(rows.filter(row => row.geo_lat !== null).map(row => row.url_resolved));
+      const stations = normalize(rows, placedOpts);
+      expect(stations.filter(s => s.placed).map(s => s.name).filter(n => n.startsWith('Own')).sort()).toEqual(
+        ['Own 0', 'Own 1', 'Own 4', 'Own 5', 'Own 8', 'Own 9'],
+      );
+      for (const s of stations) if (geoUrls.has(s.url)) expect(s.placed, `world ${w}: ${s.url}`).toBe(false);
+
+      const first = nightPlaced(rows, '2026-09-26', null);
+      for (let seed = 1; seed <= 15; seed++) {
+        expect(nightPlaced(rerun(rows, seed), '2026-09-26', null), `world ${w}, seed ${seed}`).toEqual(first);
+      }
+    }
+  }, SLOW);
+
+  // A placed station kept on the upgrade night is in the previous snapshot the night after, so preferred like every
+  // other. Were only the stream decided by coordinates, the votes of placed channels would then anchor a place at the
+  // city point, pull in the stations around it and win the broadcaster's slots: 8 stations with coordinates removed
+  // here, a night after the baseline that was to absorb every change the new rules make.
+  it('keeps the same stations and place names on the night after placed stations join the snapshot', () => {
+    const [leipzig] = CITIES;
+    const row = (id: string, lat: number | null, url: string, votes: number, state = ''): RBStation => ({
+      stationuuid: id, name: id, url_resolved: url, countrycode: 'DE', state, geo_lat: lat, geo_long: lat === null ? null : leipzig.lon,
+      codec: 'MP3', bitrate: 128, hls: 0, lastcheckok: 1, ssl_error: 0, clickcount: 0, votes, tags: '',
+    });
+    // One broadcaster: 8 channels 3.3 km north of the city point, 8 channels 3.3 km south (6.7 km apart, two places),
+    // and 3 listings without coordinates that name Leipzig, better voted than all of them.
+    const north = Array.from({ length: 8 }, (_, k) => row(`n${k}`, leipzig.lat + 0.03, `https://n${k}.mdr.example.de/live`, 1 + k));
+    const south = Array.from({ length: 8 }, (_, k) => row(`s${k}`, leipzig.lat - 0.03, `https://s${k}.mdr.example.de/live`, 1 + k));
+    const city = Array.from({ length: 3 }, (_, k) => row(`c${k}`, null, `https://c${k}.mdr.example.de/live`, 100 + k, 'Leipzig'));
+    const geo = nightPlaced([...north, ...south], '2026-09-26', null);
+    const n1 = nightPlaced([...north, ...south, ...city], '2026-09-27', geo);
+    expect(Object.keys(n1.stations).sort()).toEqual([...Object.keys(geo.stations), 'c1', 'c2'].sort());
+
+    const n2 = nightPlaced([...north, ...south, ...city], '2026-09-28', n1);
+    expect(n2.stations).toEqual(n1.stations);
+    expect(counts(n1, n2)).toEqual([0, 0, 0]);
+    expect(nightPlaced(rerun([...north, ...south, ...city], 3), '2026-09-29', n2).stations).toEqual(n1.stations);
+  });
+
+  // The previous snapshot comes before coordinates: a known placed channel keeps its broadcaster slot against a new
+  // listing with coordinates next to it, as a known channel with coordinates keeps it against a better-voted one.
+  // With coordinates first, the new one would take the slot and the placed station would never come back.
+  it('keeps a known placed station at a capped place when a new station of the same broadcaster with coordinates arrives', () => {
+    const [leipzig] = CITIES;
+    const row = (id: string, lat: number | null, url: string, votes: number, state = ''): RBStation => ({
+      stationuuid: id, name: id, url_resolved: url, countrycode: 'DE', state, geo_lat: lat, geo_long: lat === null ? null : leipzig.lon,
+      codec: 'MP3', bitrate: 128, hls: 0, lastcheckok: 1, ssl_error: 0, clickcount: 0, votes, tags: '',
+    });
+    // Nine channels with coordinates 1 km north of the city point and one listing without them that names Leipzig:
+    // ten channels of one broadcaster at one place, the cap.
+    const geo = Array.from({ length: 9 }, (_, k) => row(`g${k}`, leipzig.lat + 0.01, `https://g${k}.mdr.example.de/live`, 1 + k));
+    const city = row('city', null, 'https://city.mdr.example.de/live', 50, 'Leipzig');
+    const n0 = nightPlaced([...geo, city], '2026-09-26', null);
+    const n1 = nightPlaced([...geo, city], '2026-09-27', n0);
+    expect(Object.keys(n1.stations).sort()).toEqual([...geo.map(r => r.stationuuid), 'city'].sort());
+
+    // A new channel of the same broadcaster, with coordinates 3 km from the city point and more votes than all.
+    const fresh = row('fresh', leipzig.lat - 0.027, 'https://fresh.mdr.example.de/live', 900);
+    const n2 = nightPlaced([...geo, city, fresh], '2026-09-28', n1);
+    expect(n2.stations).toEqual(n1.stations);
+    expect(counts(n1, n2)).toEqual([0, 0, 0]);
+    const n3 = nightPlaced(rerun([...geo, city, fresh], 5), '2026-09-29', n2);
+    expect(n3.stations).toEqual(n1.stations);
+    expect(counts(n2, n3)).toEqual([0, 0, 0]);
+  });
+
+  it('gives a stream back to its row with coordinates when it returns, against the previous snapshot', () => {
+    const [leipzig] = CITIES;
+    const url = 'https://mdr.example.de/live';
+    const geo: RBStation = {
+      stationuuid: 'geo', name: 'MDR', url_resolved: url, countrycode: 'DE', state: '', geo_lat: leipzig.lat, geo_long: leipzig.lon,
+      codec: 'MP3', bitrate: 128, hls: 0, lastcheckok: 1, ssl_error: 0, clickcount: 0, votes: 0, tags: '',
+    };
+    const placed: RBStation = { ...geo, stationuuid: 'city', state: 'Leipzig', geo_lat: null, geo_long: null, votes: 50 };
+    const f1 = nightPlaced([geo, placed], '2026-09-25', null);
+    expect(Object.keys(f1.stations)).toEqual(['geo']);
+
+    // The row with coordinates fails one check: the placed listing carries the stream for a night.
+    const f2 = nightPlaced([{ ...geo, lastcheckok: 0 }, placed], '2026-09-26', f1);
+    expect(Object.keys(f2.stations)).toEqual(['city']);
+    expect(counts(f1, f2)).toEqual([0, 0, 1]);
+
+    // Back the next night, it wins although the previous snapshot has the placed listing and not it.
+    const f3 = nightPlaced([geo, placed], '2026-09-27', f2);
+    expect(Object.keys(f3.stations)).toEqual(['geo']);
+    expect(f3.stations.geo[3]).toBe('2026-09-25');
+    expect(counts(f1, f3)).toEqual([0, 0, 0]);
   });
 });

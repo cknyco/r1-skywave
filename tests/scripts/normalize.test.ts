@@ -14,6 +14,7 @@ describe('normalize', () => {
     expect(normalize([base], opts)).toEqual([{
       id: 'u1', name: 'Radio Eins', url: 'https://example.org/live.mp3', cc: 'DE', state: 'Berlin',
       lat: 52.5, lon: 13.4, codec: 'MP3', bitrate: 128, hls: false, clicks: 10, votes: 3, tags: ['pop', 'rock', 'news'],
+      placed: false,
     }]);
   });
 
@@ -48,5 +49,50 @@ describe('normalize', () => {
   it('keeps the row the previous snapshot had over more votes', () => {
     const rows = [{ ...base, stationuuid: 'a', votes: 9 }, { ...base, stationuuid: 'b', votes: 0 }];
     expect(normalize(rows, { ...opts, prefer: new Set(['b']) }).map(s => s.id)).toEqual(['b']);
+  });
+});
+
+// Ruling 51: a row without coordinates sits at the city its state names (opts.place), and on a shared stream a row
+// with coordinates wins against it.
+describe('normalize: rows without coordinates', () => {
+  const noGeo = { ...base, stationuuid: 'p', geo_lat: null, geo_long: null, state: ' Berlin ' };
+  const calls: [string, string][] = [];
+  const place = (cc: string, state: string) => {
+    calls.push([cc, state]);
+    return state === 'Berlin' ? { lat: 52.52437, lon: 13.41053 } : null;
+  };
+
+  it('places a row at the city opts.place gives, and marks it', () => {
+    const [s] = normalize([noGeo], { ...opts, place });
+    expect(s).toMatchObject({ id: 'p', cc: 'DE', state: 'Berlin', lat: 52.52437, lon: 13.41053, placed: true });
+  });
+
+  it('drops it when opts.place knows no city, or without opts.place', () => {
+    expect(normalize([{ ...noGeo, state: 'Bayern' }], { ...opts, place })).toEqual([]);
+    expect(normalize([noGeo], opts)).toEqual([]);
+  });
+
+  it('never places a row with bad coordinates, and asks only for rows that pass every other check', () => {
+    calls.length = 0;
+    expect(normalize([{ ...base, geo_lat: 0, geo_long: 0 }, { ...base, geo_lat: 91 }], { ...opts, place })).toEqual([]);
+    expect(normalize([{ ...noGeo, lastcheckok: 0 }, { ...noGeo, url_resolved: 'http://example.org/a' }], { ...opts, place })).toEqual([]);
+    expect(calls).toEqual([]);
+    normalize([noGeo], { ...opts, place });
+    expect(calls).toEqual([['DE', 'Berlin']]);
+  });
+
+  it('keeps the row with coordinates on a shared stream, against more votes, a smaller uuid and the previous snapshot', () => {
+    const geo = { ...base, stationuuid: 'z', votes: 0 };
+    const placed = { ...noGeo, stationuuid: 'a', votes: 99 };
+    for (const rows of [[geo, placed], [placed, geo]]) {
+      const kept = normalize(rows, { ...opts, place, prefer: new Set(['a']) });
+      expect(kept.map(s => [s.id, s.placed])).toEqual([['z', false]]);
+    }
+  });
+
+  it('decides between two placed rows as between two with coordinates', () => {
+    const rows = [{ ...noGeo, stationuuid: 'b', votes: 5 }, { ...noGeo, stationuuid: 'a', votes: 1 }];
+    expect(normalize(rows, { ...opts, place }).map(s => s.id)).toEqual(['b']);
+    expect(normalize(rows, { ...opts, place, prefer: new Set(['a']) }).map(s => s.id)).toEqual(['a']);
   });
 });

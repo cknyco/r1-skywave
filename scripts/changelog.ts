@@ -1,6 +1,7 @@
 // Nightly change log (Tasks 8b, 8c): compares the dataset in --data with the previous snapshot (--prev) and the
 // day base (--day-base, the last snapshot of the previous UTC day), both read from branch data-log; a missing
-// file means the first run, and a v1 snapshot from before Task 8c makes this run a fresh baseline (Ruling 42).
+// file means the first run, and a v1 snapshot from before Task 8c (Ruling 42) or a snapshot of older rules
+// (Ruling 51) makes this run a fresh baseline.
 // Writes
 //   --data/new.json                 stations first seen in the last 14 days (deployed with the site)
 //   --log/snapshot.json             every station with its first-seen date and stream hash (committed to data-log)
@@ -12,8 +13,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
-  dayBase, diffSnapshots, isDay, isLegacy, latestJson, newStations, parseSnapshot, renderMarkdown, snapshotFrom,
-  stableJson, type Snapshot,
+  dayBase, diffSnapshots, isDay, latestJson, newStations, parseSnapshot, renderMarkdown, snapshotFrom, stableJson,
+  upgradeOf, type Snapshot,
 } from './lib/changelog';
 import type { ChunkJson, PlacesJson } from './lib/emit';
 
@@ -54,9 +55,9 @@ function readSnapshot(path: string | undefined, what: string): { snap: Snapshot;
 const prev = readSnapshot(prevPath, 'previous snapshot');
 const kept = readSnapshot(basePath, 'day base');
 
-// Ruling 42: a v1 snapshot is not continued. This run is a fresh baseline (every station first seen today,
-// nothing gone, new.json empty) and the day base for later runs today.
-const upgrade = prev !== null && isLegacy(prev.snap);
+// Rulings 42 and 51: a v1 snapshot, or one of older RULES, is not continued. This run is a fresh baseline (every
+// station first seen today, nothing gone, new.json empty) and the day base for later runs today.
+const upgrade = upgradeOf(prev?.snap);
 const last = upgrade ? null : prev;
 
 const snap = snapshotFrom(places, chunks, date, last?.snap ?? null);
@@ -76,6 +77,6 @@ if (diff.baseline || diff.added.length || diff.removed.length || diff.changed.le
 writeFileSync(join(log, 'changes', 'latest.json'), `${stableJson(latestJson(diff, date, diff.total))}\n`);
 
 console.log(diff.baseline
-  ? `changelog ${date}: baseline${upgrade ? ' (format upgrade)' : ''}, ${diff.total} stations`
+  ? `changelog ${date}: baseline${upgrade ? ` (${upgrade} upgrade)` : ''}, ${diff.total} stations`
   : `changelog ${date}: +${diff.added.length} -${diff.removed.length} ~${diff.changed.length} since ${baseSnap?.date || 'the previous snapshot'}, `
     + `${diff.total} stations, ${fresh.stations.length} new in ${fresh.days} days`);

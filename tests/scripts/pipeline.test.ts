@@ -103,4 +103,14 @@ describe('stationPlaces', () => {
     expect(places[0].stations.map(s => s.id)).not.toContain('ch10');
     expect(places[0].lon).toBe(12.37);
   });
+
+  it('places rows without coordinates through opts.place, and clusters them with the rest (Ruling 51)', () => {
+    const noGeo = { ...rb('city', 'https://n.example.org/live', 0), geo_lat: null, geo_long: null, state: 'Leipzig' };
+    const place = (cc: string, state: string) => (cc === 'DE' && state === 'Leipzig' ? { lat: 51.34, lon: 12.37 } : null);
+    const { stations, places } = stationPlaces([...rows, noGeo], { ...opts, place });
+    expect(stations.find(s => s.id === 'city')).toMatchObject({ placed: true, lat: 51.34, lon: 12.37 });
+    expect(places).toHaveLength(1);
+    expect(places[0].stations.map(s => s.id)).toContain('city');
+    expect(stationPlaces([...rows, noGeo], opts).stations.map(s => s.id)).not.toContain('city');
+  });
 });

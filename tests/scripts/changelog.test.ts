@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addDays, dayBase, diffSnapshots, escapeMd, isDay, isLegacy, latestJson, newStations, parseSnapshot, renderMarkdown,
-  snapshotFrom, stableJson, streamHash, type Diff, type Snapshot,
+  addDays, DATA_UPGRADE_WHY, dayBase, diffSnapshots, escapeMd, isDay, isLegacy, latestJson, newStations, parseSnapshot,
+  renderMarkdown, RULES, snapshotFrom, stableJson, streamHash, upgradeOf, type Diff, type Snapshot,
 } from '../../scripts/lib/changelog';
 import type { ChunkJson, ChunkRow, PlacesJson } from '../../scripts/lib/emit';
 
@@ -28,6 +28,7 @@ describe('snapshotFrom', () => {
     const s = snapshotFrom(places, chunks(row(0, 'a'), row(0, 'b'), row(1, 'c')), '2026-09-26', null);
     expect(s).toEqual({
       v: 2,
+      rules: 2,
       baseline: '2026-09-26',
       date: '2026-09-26',
       stations: {
@@ -48,7 +49,7 @@ describe('snapshotFrom', () => {
 
   it('carries firstSeen and the baseline over, refreshes names, moves stations that disappeared to gone', () => {
     const prev: Snapshot = {
-      v: 2, baseline: '2026-09-01', date: '2026-09-25',
+      v: 2, rules: 2, baseline: '2026-09-01', date: '2026-09-25',
       stations: { a: ['Old name', 'Berlin', 'DE', '2026-09-01', h('a')], x: ['X', 'Wien', 'AT', '2026-09-03', h('x')] },
       gone: {},
     };
@@ -72,7 +73,7 @@ describe('snapshotFrom', () => {
 
   it('treats a new id with the same name at the same place as the station it duplicates', () => {
     const prev: Snapshot = {
-      v: 2, baseline: '2026-09-01', date: '2026-09-25',
+      v: 2, rules: 2, baseline: '2026-09-01', date: '2026-09-25',
       stations: { c: ['Radio  C', 'Wien', 'AT', '2026-09-20', h('c')] },
       gone: { a: ['Radio A', 'Berlin', 'DE', '2026-09-01', '2026-09-25', h('a')] },
     };
@@ -93,7 +94,7 @@ describe('snapshotFrom', () => {
 
   it('gives a new id on a known stream the earliest first-seen date of that stream, from stations or gone', () => {
     const prev: Snapshot = {
-      v: 2, baseline: '2026-09-01', date: '2026-09-25',
+      v: 2, rules: 2, baseline: '2026-09-01', date: '2026-09-25',
       stations: { a: ['Radio A', 'Berlin', 'DE', '2026-09-10', streamHash('https://s/1')] },
       gone: { g: ['Radio G', 'Wien', 'AT', '2026-09-05', '2026-09-20', streamHash('https://s/2')] },
     };
@@ -105,7 +106,7 @@ describe('snapshotFrom', () => {
 
   it('forgets gone stations 90 days after they went missing', () => {
     const prev: Snapshot = {
-      v: 2, baseline: '2026-01-01', date: '2026-09-25', stations: {},
+      v: 2, rules: 2, baseline: '2026-01-01', date: '2026-09-25', stations: {},
       gone: {
         kept: ['K', 'Wien', 'AT', '2026-01-01', '2026-06-28', h('kept')],
         old: ['O', 'Wien', 'AT', '2026-01-01', '2026-06-27', h('n')],
@@ -126,7 +127,7 @@ describe('snapshotFrom', () => {
 
 describe('diffSnapshots', () => {
   const prev: Snapshot = {
-    v: 2, baseline: '2026-09-01', date: '2026-09-25',
+    v: 2, rules: 2, baseline: '2026-09-01', date: '2026-09-25',
     stations: {
       a: ['A', 'Berlin', 'DE', '2026-09-01', h('a')],
       b: ['B', 'Berlin', 'DE', '2026-09-01', h('b')],
@@ -283,7 +284,7 @@ describe('changed stations (Ruling 40)', () => {
 });
 
 describe('dayBase (Ruling 41)', () => {
-  const snap = (date: string): Snapshot => ({ v: 2, baseline: '2026-09-20', date, stations: {}, gone: {} });
+  const snap = (date: string): Snapshot => ({ v: 2, rules: 2, baseline: '2026-09-20', date, stations: {}, gone: {} });
 
   it('keeps the day base through later runs on the same day', () => {
     const kept = snap('2026-09-25');
@@ -326,8 +327,22 @@ describe('renderMarkdown', () => {
   });
 
   it('names the baseline that replaces a snapshot from before Task 8c (Ruling 42)', () => {
-    const md = renderMarkdown({ ...noChange(7906), baseline: true }, '2026-09-26', 7906, true);
+    const md = renderMarkdown({ ...noChange(7906), baseline: true }, '2026-09-26', 7906, 'format');
     expect(md).toBe('# Station changes 2026-09-26\n\nBaseline (format upgrade): 7906 stations. Changes are reported from the next run on.\n');
+  });
+
+  it('names the baseline that replaces a snapshot of older rules, and says why in one line (Ruling 51)', () => {
+    const md = renderMarkdown({ ...noChange(9800), baseline: true }, '2026-09-28', 9800, 'data');
+    expect(md).toBe([
+      '# Station changes 2026-09-28',
+      '',
+      'Baseline (data upgrade): 9800 stations. Changes are reported from the next run on.',
+      '',
+      'Why: stations without coordinates now sit at the city their listing names, and a place takes the name of a city '
+        + 'of a million people within 20 km or of the city most of its stations name, so tonight starts a new comparison.',
+      '',
+    ].join('\n'));
+    expect(DATA_UPGRADE_WHY).not.toMatch(/\n/);
   });
 
   it('sorts countries by the size of their change, then by code', () => {
@@ -373,7 +388,7 @@ describe('escapeMd', () => {
 
 describe('newStations', () => {
   const snap: Snapshot = {
-    v: 2, baseline: '2026-09-01', date: '2026-09-26',
+    v: 2, rules: 2, baseline: '2026-09-01', date: '2026-09-26',
     stations: {
       a: ['A', 'Berlin', 'DE', '2026-09-01', h('a')], // baseline night: never "new", even inside the window
       b: ['B', 'Berlin', 'DE', '2026-09-12', h('b')], // exactly 14 days before 2026-09-26: in
@@ -435,7 +450,7 @@ describe('dates', () => {
 
 describe('snapshot files', () => {
   const s: Snapshot = {
-    v: 2, baseline: '2026-09-01', date: '2026-09-02',
+    v: 2, rules: 2, baseline: '2026-09-01', date: '2026-09-02',
     stations: { b: ['B', 'Berlin', 'DE', '2026-09-02', h('b')], a: ['A "x"', 'Wien', 'AT', '2026-09-01', h('a')] },
     gone: { c: ['C', 'Graz', 'AT', '2026-09-01', '2026-09-02', h('c')] },
   };
@@ -448,6 +463,7 @@ describe('snapshot files', () => {
       '  "gone": {',
       `    "c": ["C","Graz","AT","2026-09-01","2026-09-02","${h('c')}"]`,
       '  },',
+      '  "rules": 2,',
       '  "stations": {',
       `    "a": ["A \\"x\\"","Wien","AT","2026-09-01","${h('a')}"],`,
       `    "b": ["B","Berlin","DE","2026-09-02","${h('b')}"]`,
@@ -472,10 +488,30 @@ describe('snapshot files', () => {
   it('reads a v1 snapshot (before Task 8c) with an unknown date and unknown stream hashes', () => {
     const v1 = '{"v":1,"baseline":"2026-09-01","stations":{"a":["A","Wien","AT","2026-09-01"]},"gone":{"g":["G","Graz","AT","2026-09-01","2026-09-02"]}}';
     expect(parseSnapshot(v1)).toEqual({
-      v: 2, baseline: '2026-09-01', date: '',
+      v: 2, rules: 1, baseline: '2026-09-01', date: '',
       stations: { a: ['A', 'Wien', 'AT', '2026-09-01', ''] },
       gone: { g: ['G', 'Graz', 'AT', '2026-09-01', '2026-09-02', ''] },
     });
+  });
+
+  it('reads the rules of a v2 snapshot; a snapshot without them has rules 1 (Ruling 51)', () => {
+    const without = '{"v":2,"baseline":"2026-09-01","date":"2026-09-02","stations":{},"gone":{}}';
+    expect(parseSnapshot(without)).toEqual({ v: 2, rules: 1, baseline: '2026-09-01', date: '2026-09-02', stations: {}, gone: {} });
+    expect(parseSnapshot(without.replace('{', '{"rules":2,')).rules).toBe(2);
+    expect(parseSnapshot(stableJson(s)).rules).toBe(RULES);
+    for (const bad of ['0', '1.5', '"2"', 'null', '[2]']) {
+      expect(() => parseSnapshot(without.replace('{', `{"rules":${bad},`)), bad).toThrow(/snapshot/);
+    }
+    expect(() => parseSnapshot('null')).toThrow(/snapshot/);
+  });
+
+  it('calls for a format upgrade for a v1 snapshot, a data upgrade for older rules, none otherwise', () => {
+    expect(RULES).toBe(2);
+    expect(upgradeOf(undefined)).toBeUndefined();
+    expect(upgradeOf(parseSnapshot('{"v":1,"baseline":"2026-09-01","stations":{}}'))).toBe('format');
+    expect(upgradeOf(parseSnapshot('{"v":2,"baseline":"2026-09-01","date":"2026-09-02","stations":{},"gone":{}}'))).toBe('data');
+    expect(upgradeOf(parseSnapshot('{"v":2,"rules":2,"baseline":"2026-09-01","date":"2026-09-02","stations":{},"gone":{}}'))).toBeUndefined();
+    expect(upgradeOf(parseSnapshot('{"v":2,"rules":3,"baseline":"2026-09-01","date":"2026-09-02","stations":{},"gone":{}}'))).toBeUndefined();
   });
 
   it('marks a v1 snapshot as legacy, to be replaced by a fresh baseline (Ruling 42)', () => {
@@ -485,7 +521,7 @@ describe('snapshot files', () => {
 
   it('reads a v1 snapshot written before gone existed as one with nothing gone', () => {
     expect(parseSnapshot('{"v":1,"baseline":"2026-09-01","stations":{"a":["A","Wien","AT","2026-09-01"]}}')).toEqual({
-      v: 2, baseline: '2026-09-01', date: '', stations: { a: ['A', 'Wien', 'AT', '2026-09-01', ''] }, gone: {},
+      v: 2, rules: 1, baseline: '2026-09-01', date: '', stations: { a: ['A', 'Wien', 'AT', '2026-09-01', ''] }, gone: {},
     });
   });
 

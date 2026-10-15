@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { aggregate, capFamilies } from '../../scripts/lib/places';
-import { Gazetteer, parseGeoNames } from '../../scripts/lib/gazetteer';
+import { BIG_CITY_KM, BIG_CITY_POP, Gazetteer, parseGeoNames, type City } from '../../scripts/lib/gazetteer';
 import type { Station } from '../../scripts/lib/normalize';
 
 const st = (id: string, lat: number, lon: number, votes = 0): Station => ({
   id, name: id, url: `https://x/${id}`, cc: 'DE', state: '', lat, lon, codec: 'MP3', bitrate: 128,
-  hls: false, clicks: 0, votes, tags: [],
+  hls: false, clicks: 0, votes, tags: [], placed: false,
 });
 
 describe('aggregate', () => {
@@ -39,6 +39,35 @@ describe('aggregate', () => {
     );
   });
 
+  // Ruling 51: of two stations the previous snapshot has (or of two it has not), the one with coordinates anchors
+  // a place and keeps a broadcaster slot, whatever the votes; a known placed station keeps both against a new one.
+  it('anchors a place at a station with coordinates before one placed at its city of the same preference', () => {
+    const placed = { ...st('p', 52.52, 13.40, 99), placed: true };
+    expect(aggregate([placed, st('a', 52.53, 13.41)], new Set(['p', 'a']))[0].lat).toBe(52.53);
+    expect(aggregate([placed, st('a', 52.53, 13.41)])[0].lat).toBe(52.53);
+    expect(aggregate([placed, st('a', 52.53, 13.41)], new Set(['p']))[0].lat).toBe(52.52);
+  });
+
+  it('caps a broadcaster keeping its stations with coordinates before placed ones', () => {
+    const geo = Array.from({ length: 9 }, (_, i) => ({ ...st(`g${i}`, 50.3, 11.9, i), url: `https://ch${i}.radionetz.de/live` }));
+    const placed = Array.from({ length: 3 }, (_, i) => ({ ...st(`p${i}`, 50.31, 11.9, 50 + i), url: `https://city${i}.radionetz.de/live`, placed: true }));
+    const known = new Set([...geo, ...placed].map(s => s.id));
+    const ids = capFamilies(aggregate([...placed, ...geo], known), known)[0].stations.map(s => s.id);
+    expect(ids).toHaveLength(10);
+    expect(ids).toEqual(expect.arrayContaining(geo.map(s => s.id)));
+    expect(ids.filter(id => id.startsWith('p'))).toEqual(['p2']);
+  });
+
+  it('keeps a known placed channel in its slot against a new channel with coordinates, whatever its votes', () => {
+    const geo = Array.from({ length: 9 }, (_, i) => ({ ...st(`g${i}`, 50.3, 11.9, i), url: `https://ch${i}.radionetz.de/live` }));
+    const placed = { ...st('p', 50.31, 11.9, 5), url: 'https://city.radionetz.de/live', placed: true };
+    const fresh = { ...st('new', 50.32, 11.91, 900), url: 'https://new.radionetz.de/live' };
+    const known = new Set([...geo, placed].map(s => s.id));
+    const [place] = capFamilies(aggregate([fresh, placed, ...geo], known), known);
+    expect(place.stations.map(s => s.id).sort()).toEqual([...known].sort());
+    expect(place.lat).toBe(50.3);
+  });
+
   it('keeps the channels the previous snapshot had', () => {
     const family = Array.from({ length: 12 }, (_, i) => ({ ...st(`n${i}`, 50.3, 11.9, i), url: `https://ch${i}.radionetz.de/live` }));
     const known = new Set(['n0', 'n1']);
@@ -60,7 +89,9 @@ describe('gazetteer', () => {
   ].join('\n');
 
   it('parses GeoNames rows', () => {
-    expect(parseGeoNames(tsv)[0]).toEqual({ name: 'Berlin', lat: 52.52437, lon: 13.41053, cc: 'DE', pop: 3426354, tz: 'Europe/Berlin' });
+    expect(parseGeoNames(tsv)[0]).toEqual({
+      name: 'Berlin', lat: 52.52437, lon: 13.41053, cc: 'DE', pop: 3426354, tz: 'Europe/Berlin', ascii: 'Berlin', admin1: '16',
+    });
   });
 
   it('drops city districts such as Berlin-Mitte', () => {
@@ -77,5 +108,50 @@ describe('gazetteer', () => {
     const g = new Gazetteer(parseGeoNames(tsv));
     expect(g.nearest(51.2, 13.4, 'DE')).toBeNull();
     expect(g.nearest(51.2, 13.4, 'DE', 250)?.name).toBe('Berlin');
+  });
+});
+
+// Ruling 51: a city of a million people or more within 20 km, in the place's own country, names the place. GeoNames
+// cities15000 rows (2026-09-27); each case puts a place on a town's own coordinates.
+describe('gazetteer: big cities', () => {
+  const at = (name: string, lat: number, lon: number, cc: string, pop: number): City => ({ name, lat, lon, cc, pop, tz: '' });
+  const CITIES = [
+    at('Tokyo', 35.6895, 139.69171, 'JP', 9733276),
+    at('Aoi', 35.77432, 139.81654, 'JP', 17422),          // a town in Tokyo prefecture, 14.7 km from Tokyo
+    at('Kawasaki', 35.52056, 139.71722, 'JP', 1538262),   // 18.9 km from Tokyo
+    at('Yokohama', 35.43333, 139.65, 'JP', 3777491),      // 28.7 km from Tokyo, 11.5 km from Kawasaki
+    at('Berlin', 52.52437, 13.41053, 'DE', 3426354),
+    at('Potsdam', 52.39886, 13.06566, 'DE', 184754),      // 27.2 km from Berlin
+    at('Frankfurt am Main', 50.11552, 8.68417, 'DE', 650000),
+    at('Offenbach', 50.10061, 8.76647, 'DE', 119192),     // 6.1 km from Frankfurt, which is under a million
+    at('Macau', 22.20056, 113.54611, 'MO', 649335),
+    at('Zhuhai', 22.27694, 113.56778, 'CN', 2207090),     // 8.8 km from Macau, in another country
+  ];
+  const g = new Gazetteer(CITIES);
+  const name = (town: string) => {
+    const c = CITIES.find(x => x.name === town)!;
+    return g.nearest(c.lat, c.lon, c.cc)?.name;
+  };
+
+  it('names a place in a town near a big city after the big city: Aoi is Tokyo', () => {
+    expect([BIG_CITY_POP, BIG_CITY_KM]).toEqual([1_000_000, 20]);
+    expect(name('Aoi')).toBe('Tokyo');
+  });
+
+  it('keeps the name of a big city next to a bigger one: Kawasaki and Yokohama', () => {
+    expect(name('Kawasaki')).toBe('Kawasaki');
+    expect(name('Yokohama')).toBe('Yokohama');
+    expect(name('Tokyo')).toBe('Tokyo');
+  });
+
+  it('keeps a town more than 20 km from a big city, or next to a city under a million: Potsdam, Offenbach', () => {
+    expect(name('Potsdam')).toBe('Potsdam');
+    expect(name('Offenbach')).toBe('Offenbach');
+    expect(name('Frankfurt am Main')).toBe('Frankfurt am Main');
+  });
+
+  it('never takes a big city from another country: Macau stays Macau', () => {
+    expect(name('Macau')).toBe('Macau');
+    expect(g.nearest(22.20056, 113.54611, 'CN')?.name).toBe('Zhuhai');
   });
 });

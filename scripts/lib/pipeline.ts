@@ -1,8 +1,10 @@
 // The station pipeline of build-data.ts: Radio Browser rows → one station per stream → places, with every step
-// that picks one station over another preferring the ids of the previous snapshot (Rulings 39 and 42).
+// that picks one station over another preferring the ids of the previous snapshot (Rulings 39 and 42), and rows
+// without coordinates placed at the city their state names, never ahead of a row with coordinates of equal
+// preference and never on a stream a row with coordinates has (Ruling 51).
 import { existsSync, readFileSync } from 'node:fs';
 import { isLegacy, parseSnapshot, type Snapshot } from './changelog';
-import { normalize, type Station } from './normalize';
+import { normalize, type NormalizeOptions, type Station } from './normalize';
 import { aggregate, capFamilies, type Place } from './places';
 import type { RBStation } from './radiobrowser';
 
@@ -27,11 +29,11 @@ export function readPrefer(path: string | undefined, warn: (line: string) => voi
   }
 }
 
-/** Dedupe by stream, cluster into places, cap broadcasters: all three with the same preference. */
-export function stationPlaces(
-  rows: RBStation[],
-  opts: { allowHttp: boolean; allowHls: boolean; prefer?: ReadonlySet<string> },
-): { stations: Station[]; places: Place[] } {
+/**
+ * Place the rows without coordinates that name a known city (opts.place, Ruling 51), dedupe by stream, cluster into
+ * places, cap broadcasters: the last three with the same preference.
+ */
+export function stationPlaces(rows: RBStation[], opts: NormalizeOptions): { stations: Station[]; places: Place[] } {
   const stations = normalize(rows, opts);
   return { stations, places: capFamilies(aggregate(stations, opts.prefer), opts.prefer) };
 }

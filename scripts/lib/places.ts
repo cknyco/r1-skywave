@@ -14,7 +14,7 @@ function cellOf(lat: number, lon: number): [number, number] {
   return [Math.floor(lat / CELL), Math.floor((lon + 180) / CELL)];
 }
 
-/** Greedy clustering: each station joins the first place within radiusKm, taken in byIdentity order (Ruling 39). */
+/** Greedy clustering: each station joins the first place within radiusKm, taken in byIdentity order (Rulings 39, 51). */
 export function aggregate(stations: Station[], prefer?: ReadonlySet<string>, radiusKm = 5): Place[] {
   const sorted = [...stations].sort(byIdentity(prefer));
   const grid = new Map<string, Place[]>();

@@ -85,4 +85,60 @@ describe('changelog CLI', () => {
     expect(next.fresh).toEqual(['m']);
     expect(JSON.parse(next.read('snapshot.json')!).baseline).toBe('2026-09-26');
   }, 30_000);
+
+  // Ruling 51: the live data-log snapshot of 2026-09-27 has no rules (1). Tonight's dataset places stations by their
+  // city and names places after big cities, so the run starts a fresh baseline, as the format upgrade did.
+  const v2 = (rules?: number) => `${JSON.stringify({
+    v: 2, ...(rules === undefined ? {} : { rules }), baseline: '2026-09-25', date: '2026-09-27',
+    stations: {
+      a: ['Studentenradio', 'Leipzig', 'DE', '2026-09-25', 'aaaaaaaaaaaa'],
+      x: ['Radio X', 'Aoi', 'DE', '2026-09-26', 'bbbbbbbbbbbb'],
+    },
+    gone: { g: ['Radio G', 'Gera', 'DE', '2026-09-25', '2026-09-27', 'cccccccccccc'] },
+  })}\n`;
+  function prevRun(name: string, text: string) {
+    const log = join(dir, name, 'log');
+    mkdirSync(log, { recursive: true });
+    writeFileSync(join(log, 'snapshot.json'), text);
+    writeFileSync(join(log, 'day-base.json'), text.replace('"date":"2026-09-27"', '"date":"2026-09-26"'));
+  }
+  const tonight = [r('a', 'Studentenradio', 0), r('x', 'Radio X'), r('g', 'Radio G', 1), r('b', 'Radio B')];
+
+  it('replaces a snapshot of older rules with a fresh baseline and says why (Ruling 51)', () => {
+    prevRun('rules1', v2());
+    const upgrade = run('d1', '2026-09-28', tonight, 'rules1');
+    const snap = JSON.parse(upgrade.read('snapshot.json')!);
+    expect(snap).toMatchObject({ v: 2, rules: 2, baseline: '2026-09-28', date: '2026-09-28', gone: {} });
+    expect(Object.values(snap.stations as Record<string, string[]>).map(e => e[3])).toEqual(Array(4).fill('2026-09-28'));
+    expect(upgrade.read('day-base.json')).toBe(upgrade.read('snapshot.json'));
+    expect(upgrade.fresh).toEqual([]);
+    expect(upgrade.latest).toMatchObject({ date: '2026-09-28', total: 4, added: 0, removed: 0, changed: 0, baseline: true });
+    expect(upgrade.read('changes/2026-09-28.md')).toBe([
+      '# Station changes 2026-09-28',
+      '',
+      'Baseline (data upgrade): 4 stations. Changes are reported from the next run on.',
+      '',
+      'Why: stations without coordinates now sit at the city their listing names, and a place takes the name of a city '
+        + 'of a million people within 20 km or of the city most of its stations name, so tonight starts a new comparison.',
+      '',
+    ].join('\n'));
+    expect(upgrade.out).toContain('changelog 2026-09-28: baseline (data upgrade), 4 stations');
+
+    // The next night compares with it as usual.
+    const next = run('d2', '2026-09-29', [...tonight, r('n', 'New')], 'd1');
+    expect(next.latest).toMatchObject({ added: 1, removed: 0, changed: 0, baseline: false });
+    expect(next.fresh).toEqual(['n']);
+  }, 30_000);
+
+  it('continues a snapshot of the same rules with a normal diff', () => {
+    prevRun('rules2', v2(2));
+    const same = run('e1', '2026-09-28', tonight, 'rules2');
+    const snap = JSON.parse(same.read('snapshot.json')!);
+    expect(snap).toMatchObject({ rules: 2, baseline: '2026-09-25', gone: {} });
+    expect(snap.stations.x[3]).toBe('2026-09-26');
+    expect(snap.stations.g[3]).toBe('2026-09-25');   // back from gone: keeps its first-seen date
+    expect(same.latest).toMatchObject({ date: '2026-09-28', added: 2, removed: 0, changed: 0, baseline: false });
+    expect(same.read('changes/2026-09-28.md')).toContain('4 stations: 2 added, 0 removed, 0 changed.');
+    expect(same.out).toContain('changelog 2026-09-28: +2 -0 ~0 since 2026-09-27');
+  }, 30_000);
 });

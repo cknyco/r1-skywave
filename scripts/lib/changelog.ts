@@ -11,10 +11,12 @@ export type SnapshotEntry = [name: string, placeName: string, cc: string, firstS
 export type GoneEntry = [name: string, placeName: string, cc: string, firstSeen: string, goneSince: string, stream: string];
 /**
  * Keyed by station uuid; `baseline` is the date (YYYY-MM-DD, UTC) of the first run ever, `date` the date of the
- * run that wrote it ('' when unknown: a v1 snapshot from before Task 8c, read by parseSnapshot).
+ * run that wrote it ('' when unknown: a v1 snapshot from before Task 8c, read by parseSnapshot), `rules` the RULES of
+ * the dataset it lists (1 when the file has none).
  */
 export interface Snapshot {
   v: 2;
+  rules: number;
   baseline: string;
   date: string;
   stations: Record<string, SnapshotEntry>;
@@ -59,6 +61,15 @@ export interface LatestJson {
 
 const LIST_CAP = 200;
 const GONE_DAYS = 90;
+
+/**
+ * Ruling 51: the rules the dataset is built by, written into every snapshot. Rules 2 place stations without
+ * coordinates at the city their state names, after every station with coordinates, and name a place after a city of
+ * a million people within 20 km or after the city most of its stations name. A
+ * snapshot of older rules is not continued: the CLI writes a fresh baseline, as for the format upgrade of Ruling 42,
+ * so the stations and names the new rules bring do not show as added or changed. Raise it for the next such change.
+ */
+export const RULES = 2;
 
 // Station ids and country codes are third-party data: read them as own properties only.
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>
@@ -135,7 +146,8 @@ export function snapshotFrom(
   }
   // Object.fromEntries defines own data properties, so an id such as "__proto__" stays plain data.
   return {
-    v: 2, baseline: prev?.baseline ?? today, date: today, stations: Object.fromEntries(seen), gone: Object.fromEntries(gone),
+    v: 2, rules: RULES, baseline: prev?.baseline ?? today, date: today, stations: Object.fromEntries(seen),
+    gone: Object.fromEntries(gone),
   };
 }
 
@@ -253,11 +265,21 @@ function changedLine(c: Changed): string {
   return `- ${name} — ${place} (${cc}), re-listed`;
 }
 
-/** `upgrade`: the baseline replaces a snapshot from before Task 8c (Ruling 42). */
-export function renderMarkdown(diff: Diff, today: string, total: number, upgrade = false): string {
+/** Why a baseline replaces the previous snapshot: its format is from before Task 8c (Ruling 42), or its RULES are older (Ruling 51). */
+export type Upgrade = 'format' | 'data';
+
+/** The line a data upgrade's log adds under the baseline. */
+export const DATA_UPGRADE_WHY = 'Why: stations without coordinates now sit at the city their listing names, and a place '
+  + 'takes the name of a city of a million people within 20 km or of the city most of its stations name, so tonight '
+  + 'starts a new comparison.';
+
+export function renderMarkdown(diff: Diff, today: string, total: number, upgrade?: Upgrade): string {
   const head = `# Station changes ${today}`;
-  const baseline = upgrade ? 'Baseline (format upgrade)' : 'Baseline';
-  if (diff.baseline) return `${head}\n\n${baseline}: ${total} stations. Changes are reported from the next run on.\n`;
+  const baseline = upgrade ? `Baseline (${upgrade} upgrade)` : 'Baseline';
+  if (diff.baseline) {
+    const why = upgrade === 'data' ? `\n${DATA_UPGRADE_WHY}\n` : '';
+    return `${head}\n\n${baseline}: ${total} stations. Changes are reported from the next run on.\n${why}`;
+  }
   const size = (c: CountryChange) => c.added + c.removed + c.changed;
   const countries = Object.keys(diff.byCountry)
     .map(cc => ({ cc, ...diff.byCountry[cc] }))
@@ -314,21 +336,32 @@ export function stableJson(value: unknown, indent = ''): string {
  */
 export const isLegacy = (s: Snapshot): boolean => s.date === '';
 
+/** The upgrade a previous snapshot calls for, if any: a v1 file first (Ruling 42), then older RULES (Ruling 51). */
+export function upgradeOf(prev: Snapshot | undefined): Upgrade | undefined {
+  if (!prev) return undefined;
+  return isLegacy(prev) ? 'format' : prev.rules < RULES ? 'data' : undefined;
+}
+
 /**
  * Parses a snapshot.json or day-base.json; throws on anything that is not a station snapshot. A v1 snapshot
  * (Task 8b) comes back as v2 with an unknown date ('', see isLegacy) and unknown stream hashes, so it never
- * pairs as changed.
+ * pairs as changed. A snapshot without `rules` (all of them before Ruling 51) has rules 1.
  */
 export function parseSnapshot(text: string): Snapshot {
   const s = JSON.parse(text) as Record<string, unknown>;
   const table = (t: unknown, width: number) => !!t && typeof t === 'object' && !Array.isArray(t)
     && Object.values(t).every(e => Array.isArray(e) && e.length === width && e.every(x => typeof x === 'string'));
   const shaped = !!s && typeof s === 'object' && !Array.isArray(s) && isDay(String(s.baseline));
-  if (shaped && s.v === 2 && isDay(String(s.date)) && table(s.stations, 5) && table(s.gone, 6)) return s as unknown as Snapshot;
+  const rules = shaped && (s.rules === undefined || (Number.isInteger(s.rules) && (s.rules as number) >= 1));
+  if (rules && s.v === 2 && isDay(String(s.date)) && table(s.stations, 5) && table(s.gone, 6)) {
+    return { ...s, rules: s.rules ?? 1 } as unknown as Snapshot;
+  }
   if (shaped && s.v === 1 && table(s.stations, 4) && (s.gone === undefined || table(s.gone, 5))) {
     // Snapshots written before `gone` existed have none. Object.fromEntries keeps ids such as "__proto__" plain.
     const widen = <T>(t: unknown) => Object.fromEntries(Object.entries((t ?? {}) as Record<string, string[]>).map(([id, e]) => [id, [...e, ''] as T]));
-    return { v: 2, baseline: String(s.baseline), date: '', stations: widen<SnapshotEntry>(s.stations), gone: widen<GoneEntry>(s.gone) };
+    return {
+      v: 2, rules: 1, baseline: String(s.baseline), date: '', stations: widen<SnapshotEntry>(s.stations), gone: widen<GoneEntry>(s.gone),
+    };
   }
   throw new Error('not a v1 or v2 station snapshot');
 }
