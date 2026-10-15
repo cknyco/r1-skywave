@@ -2,7 +2,7 @@
 
 Written by the `pages` workflow after each build with fresh station data; never merged into `main`.
 
-- `snapshot.json`: every station in the deployed dataset, keyed by Radio Browser uuid, with name, place, country, the date it was first seen and a short hash of its stream URL.
+- `snapshot.json`: every station in the deployed dataset, keyed by Radio Browser uuid, with name, place, country, the date it was first seen and a short hash of its stream URL; `rules` is the version of the rules the dataset was built by, and a change starts a new baseline.
 - `day-base.json`: the last snapshot of the previous UTC day.
 - `changes/YYYY-MM-DD.md`: stations added, removed and changed (the same stream under a new uuid: renamed, moved or re-listed) since the end of the previous day. Later runs on the same day replace it; a day whose changes cancel out has none.
 - `changes/latest.json`: the counts behind the latest day file.
