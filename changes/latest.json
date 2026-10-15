@@ -1,19 +1,14 @@
 {
-  "added": 18,
+  "added": 26,
   "baseline": false,
   "byCountry": {
-    "AU": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "BG": {
+    "AL": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "BR": {
-      "added": 1,
+      "added": 8,
       "changed": 0,
       "removed": 0
     },
@@ -22,45 +17,60 @@
       "changed": 0,
       "removed": 0
     },
-    "CO": {
+    "CU": {
       "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "DE": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "ES": {
-      "added": 2,
       "changed": 0,
       "removed": 0
     },
     "FR": {
+      "added": 2,
+      "changed": 0,
+      "removed": 0
+    },
+    "GB": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "MA": {
+    "IT": {
+      "added": 3,
+      "changed": 0,
+      "removed": 0
+    },
+    "NG": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "PL": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "SE": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "UA": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "US": {
-      "added": 7,
+      "added": 4,
       "changed": 0,
       "removed": 0
     },
-    "VG": {
+    "VE": {
       "added": 1,
       "changed": 0,
       "removed": 0
     }
   },
   "changed": 0,
-  "date": "2026-10-14",
+  "date": "2026-10-15",
   "removed": 0,
-  "total": 8375,
+  "total": 8401,
   "v": 1
 }
