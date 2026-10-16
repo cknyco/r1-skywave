@@ -10,3 +10,6 @@ playwright-report/
 .remember/
 docs/
 public/data/
+# Claude Code hook audit logs (local tool receipts), never project files
+receipts/
+review-receipts/
