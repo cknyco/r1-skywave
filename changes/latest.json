@@ -1,10 +1,41 @@
 {
-  "added": 0,
+  "added": 55,
   "baseline": false,
-  "byCountry": {},
+  "byCountry": {
+    "AL": {
+      "added": 8,
+      "changed": 0,
+      "removed": 0
+    },
+    "AO": {
+      "added": 4,
+      "changed": 0,
+      "removed": 0
+    },
+    "EE": {
+      "added": 6,
+      "changed": 0,
+      "removed": 0
+    },
+    "LT": {
+      "added": 18,
+      "changed": 0,
+      "removed": 0
+    },
+    "LV": {
+      "added": 14,
+      "changed": 0,
+      "removed": 0
+    },
+    "US": {
+      "added": 5,
+      "changed": 0,
+      "removed": 0
+    }
+  },
   "changed": 0,
   "date": "2026-10-16",
   "removed": 0,
-  "total": 10356,
+  "total": 10411,
   "v": 1
 }
