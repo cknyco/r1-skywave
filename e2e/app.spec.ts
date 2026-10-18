@@ -5,8 +5,8 @@ import { minCountForZoom } from '../src/map/lod';
 import { visibleTiles } from '../src/map/tiles';
 import { buildWalk, stepWalk } from '../src/map/walk';
 import { fold } from '../src/voice/fold';
-import { fakeStreams, newStations, offline, TILE } from './net';
-import { fly } from './ui';
+import { fakeStreams, gestureOnly, newStations, noGesture, offline, TILE } from './net';
+import { fly, tuneIn } from './ui';
 
 // The app at the r1's 240×292 CSS viewport (dpr 2). Nothing leaves localhost (e2e/net.ts): map tiles come from a
 // fixture, streams are faked, and data/new.json is absent unless a test serves one. The wheel is the volume unless ✈
@@ -22,12 +22,6 @@ test.beforeEach(async ({ page }) => {
   await fakeStreams(page);
   await newStations(page);
 });
-
-async function tuneIn(page: Page, query = '?place=Berlin'): Promise<void> {
-  await page.goto(`/${query}`);
-  await page.click('#start');
-  await expect(page.locator('#gate')).toBeHidden();
-}
 
 test('gate, Berlin on the map, wheel walk, station list and favourites, no radio.garden request', async ({ page }) => {
   const hosts: string[] = [];
@@ -99,6 +93,31 @@ test('gate, Berlin on the map, wheel walk, station list and favourites, no radio
   expect(hosts).toContain('localhost');
   expect(hosts).toContain('tiles.maps.eox.at');   // requested (and answered from the fixture)
   expect(hosts.filter(h => h === 'radio.garden' || h.endsWith('.radio.garden'))).toEqual([]);
+});
+
+test('at the gate a side click without a gesture pulses "Tap to tune in" and starts nothing', async ({ page }) => {
+  await gestureOnly(page);
+  const run = await noGesture(page);   // page.evaluate would itself be a gesture
+  await page.goto('/?place=Berlin');
+  await expect.poll(() => run('!!window.__app')).toBe(true);
+  await run("window.dispatchEvent(new Event('sideClick'))");   // untrusted, like the r1's hardware events
+  await expect.poll(() => page.locator('#start').evaluate(b => b.getAnimations().length)).toBeGreaterThan(0);
+  await page.waitForTimeout(400);
+  await expect(page.locator('#gate')).toBeVisible();
+  expect((await page.evaluate(() => (window as any).__app.audio())).src).toBe('');   // nothing tuned
+  await expect(page.locator('#strip .name')).not.toHaveClass(/live/);
+});
+
+test('at the gate the side button with a gesture (desktop Space) tunes in like the tap, and that press does not also stop it', async ({ page }) => {
+  await gestureOnly(page);
+  const run = await noGesture(page);   // so the press is the only gesture
+  await page.goto('/?place=Berlin');
+  await expect.poll(() => run('!!window.__app')).toBe(true);
+  await page.keyboard.press(' ');   // trusted keyup → sideClick inside the gesture
+  await expect(page.locator('#gate')).toBeHidden();
+  await expect(page.locator('#strip .name')).toHaveClass(/live/);
+  await page.waitForTimeout(500);
+  await expect(page.locator('#strip .name')).toHaveClass(/live/);
 });
 
 test('at globe zoom the wheel only visits places the map shows', async ({ page }) => {
@@ -230,6 +249,16 @@ test('Ruling 44: a transcript naming a place jumps at once, without asking the L
   await tuneIn(page);
   await expect(status).toHaveText('live');
 
+  // The lazy-load fast-path check (decision 2026-10-17): the hold starts loading the voice city list (cities.js), and
+  // the transcript arrives in the same task, before the list can be there, so the fast path waits for it. A big city
+  // with no place of that name, which only the list knows, lands on the place standing for it.
+  await page.evaluate(() => {
+    for (const e of ['longPressStart', 'longPressEnd']) window.dispatchEvent(new Event(e));
+    (window as any).onPluginMessage({ type: 'sttEnded', transcript: 'take me to Shenzhen' });
+  });
+  await expect(where).toHaveText(/^Guangzhou · China ·/);
+  expect(await asks(page)).toBe(0);
+
   await fire(page, 'longPressStart');
   await fire(page, 'longPressEnd');
   await send(page, { type: 'sttEnded', transcript: 'Dress from Sao Paulo' });
@@ -237,20 +266,117 @@ test('Ruling 44: a transcript naming a place jumps at once, without asking the L
   await expect(status).not.toHaveText('thinking…');
   expect(await asks(page)).toBe(0);
 
-  await fire(page, 'longPressStart');   // a big city with no place of that name: the place standing for it
-  await fire(page, 'longPressEnd');
-  await send(page, { type: 'sttEnded', transcript: 'take me to New York' });
-  await expect(where).toHaveText(/^New York City · United States ·/);
-  expect(await asks(page)).toBe(0);
-
   await page.click('#binfo');   // Ruling 50: one tap
   const about = page.locator('#about');
   await expect(about).toBeVisible();
   await expect(about.locator('.diag')).toContainText('Voice log');
   await expect(about.locator('.diag')).toContainText('"transcript":"Dress from Sao Paulo"');
+  await expect(about.locator('.diag')).toContainText('fast path: Guangzhou, CN');
   await expect(about.locator('.diag')).toContainText('fast path: São Paulo, BR');
-  await expect(about.locator('.diag')).toContainText('fast path: New York City, US');
   expect(await about.textContent()).not.toContain('"pluginId"');
+});
+
+test('decision 2026-10-17: when the city list fails to load, voice still works through the LLM and the voice log says so', async ({ page }) => {
+  await fakeBridge(page);
+  await page.route('**/cities.js*', r => r.abort());
+  const status = page.locator('#status');
+  const where = page.locator('#strip .where');
+  await tuneIn(page);
+  await expect(status).toHaveText('live');
+
+  await fire(page, 'longPressStart');
+  await fire(page, 'longPressEnd');
+  await send(page, { type: 'sttEnded', transcript: 'take me to Shenzhen' });   // only the list knows it: the LLM is asked
+  await expect(status).toHaveText('thinking…');
+  expect(await asks(page)).toBe(1);
+  await send(page, { message: 'ok', pluginId: 'p', data: '{"place":"Guangzhou","country":"CN","genre":null}' });
+  await expect(where).toHaveText(/^Guangzhou · China ·/);
+  expect(await asks(page)).toBe(1);
+  await page.click('#binfo');
+  await expect(page.locator('#about .diag')).toContainText('city list failed');
+});
+
+test('final review A3: a city list that failed to load is tried again on the next voice hold, under a URL of its own', async ({ page }) => {
+  await fakeBridge(page);
+  const asked: string[] = [];
+  await page.route('**/cities.js*', r => { asked.push(r.request().url()); return asked.length === 1 ? r.abort() : r.continue(); });
+  const status = page.locator('#status');
+  const where = page.locator('#strip .where');
+  await tuneIn(page);
+  await expect(status).toHaveText('live');
+
+  await fire(page, 'longPressStart');   // the first load fails (a Wi-Fi blip)
+  await fire(page, 'longPressEnd');
+  await send(page, { type: 'sttEnded', transcript: 'Dress from Sao Paulo' });   // a place: found without the list
+  await expect(where).toHaveText(/^São Paulo · Brazil ·/);
+  expect(asked).toHaveLength(1);
+
+  const loaded = page.waitForResponse(r => /cities\.js.*[?&]r=1$/.test(r.url()));
+  await fire(page, 'longPressStart');   // the next hold loads it again
+  await loaded;
+  expect(asked).toHaveLength(2);
+  expect(asked[1]).not.toBe(asked[0]);
+  expect(asked[1]).toMatch(/[?&]r=1$/);
+  await page.waitForTimeout(200);       // the module runs (meanwhile a transcript would search without the list)
+  await fire(page, 'longPressEnd');
+  await send(page, { type: 'sttEnded', transcript: 'take me to Shenzhen' });   // only the list knows it
+  await expect(where).toHaveText(/^Guangzhou · China ·/);
+  expect(await asks(page)).toBe(0);
+  await page.click('#binfo');
+  await expect(page.locator('#about .diag')).toContainText('city list failed');
+  await expect(page.locator('#about .diag')).toContainText('fast path: Guangzhou, CN');
+});
+
+test('T1-M2: a city list still loading after 2 s sends the search to the LLM and the voice log says "still loading"', async ({ page }) => {
+  test.setTimeout(30000);
+  await fakeBridge(page);
+  await page.route('**/cities.js*', async r => { await new Promise(t => setTimeout(t, 6000)); await r.continue(); });   // 6 s late
+  const status = page.locator('#status');
+  await tuneIn(page);
+  await expect(status).toHaveText('live');
+
+  await fire(page, 'longPressStart');
+  await fire(page, 'longPressEnd');
+  await send(page, { type: 'sttEnded', transcript: 'take me to Shenzhen' });
+  await expect(status).toHaveText('thinking…', { timeout: 4000 });   // after the 2 s wait
+  expect(await asks(page)).toBe(1);
+  await page.click('#binfo');
+  await expect(page.locator('#about .diag')).toContainText('city list still loading');
+  await expect(page.locator('#about .diag')).not.toContainText('city list failed');
+});
+
+test('decision 2026-10-17 (ruling P4): a transcript waiting for the city list never jumps or asks for a retry hold that started meanwhile', async ({ page }) => {
+  test.setTimeout(40000);
+  await fakeBridge(page);
+  await page.route('**/cities.js*', async r => { await new Promise(t => setTimeout(t, 6000)); await r.continue(); });   // 6 s late
+  const status = page.locator('#status');
+  const where = page.locator('#strip .where');
+  await tuneIn(page);
+  await expect(status).toHaveText('live');
+
+  await fire(page, 'longPressStart');   // search 1: the list starts loading
+  await fire(page, 'longPressEnd');
+  await send(page, { type: 'sttEnded', transcript: 'play me something romantic' });   // no place: would ask the LLM after the wait
+  await fire(page, 'longPressStart');   // search 2, a retry hold inside the 2 s wait
+  await page.waitForTimeout(2500);      // search 1's wait is over, and its session has ended
+  expect(await asks(page)).toBe(0);
+  await expect(status).toHaveText('listening…');
+  await expect(where).toHaveText(/^Berlin ·/);
+
+  await fire(page, 'longPressEnd');
+  await send(page, { type: 'sttEnded', transcript: 'Dress from Sao Paulo' });   // a place: would jump after the wait
+  await fire(page, 'longPressStart');   // search 3, again inside the wait
+  await page.waitForTimeout(2500);
+  await fire(page, 'longPressEnd');     // an outcome held back for the open mic would land now
+  await page.waitForTimeout(300);
+  await expect(where).toHaveText(/^Berlin ·/);
+  expect(await asks(page)).toBe(0);
+
+  await send(page, { type: 'sttEnded', transcript: 'take me to Shenzhen' });   // search 3's own: lands once the list is there
+  await expect(where).toHaveText(/^Guangzhou · China ·/);
+  expect(await asks(page)).toBe(0);
+  await page.click('#binfo');
+  await expect(page.locator('#about .diag')).toContainText('ended while waiting for the city list');
 });
 
 test('Ruling 44: a slow LLM reply (20 s) still lands; plain text counts only when it asks for a place, so a refusal naming an artist never jumps', async ({ page }) => {
@@ -633,10 +759,10 @@ test('Ruling 49: the wheel is the volume, 5 % per event, the bar reads the eleme
   expect(await volume(page)).toBe(1);   // 100 % on the first run
   await expect(page.locator('#bfly')).not.toHaveClass(/\bon\b/);
 
-  await fire(page, 'scrollUp');   // louder at 100 %: the note that the r1's own volume sets the maximum
+  await fire(page, 'scrollUp');   // louder at 100 %: the note names the r1's own volume setting
   await expect(bar).toBeVisible();
   await expect(bar.locator('.pct')).toHaveText('100 %');
-  await expect(bar.locator('.note')).toHaveText("The r1's own volume sets the maximum.");
+  await expect(bar.locator('.note')).toHaveText('Louder: r1 Settings › Sound › Volume');
   expect(await volume(page)).toBe(1);
 
   for (let k = 0; k < 8; k++) await fire(page, 'scrollDown');   // softer: 100 → 60

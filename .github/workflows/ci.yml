@@ -1,9 +1,10 @@
 # Runs on every push (any branch) and on every pull request: typecheck, build the app against the
 # live dataset already published on our own Pages site (never Radio Browser — a CI run must not
 # depend on that service or count against it), the Vitest unit suite, and the full Playwright e2e
-# suite (including the CPU-throttled wheel-walk check in e2e/throttle.spec.ts) against headless
-# Chromium. It only verifies the tree; it never deploys anything. Deployment is pages.yml, which
-# runs separately on pushes to main.
+# suite (including the CPU-throttled wheel-walk check in e2e/throttle.spec.ts and the white check
+# e2e/white.spec.ts, which pages.yml also runs alone on fresh data before deploying it) against
+# headless Chromium. It only verifies the tree; it never deploys anything. Deployment is pages.yml,
+# which runs separately on pushes to main.
 name: ci
 on:
   push:

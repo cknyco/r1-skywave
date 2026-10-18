@@ -32,7 +32,7 @@ export const ABOUT = [
   'Station data: Radio Browser (public domain).',
   'Place names: GeoNames (CC BY 4.0).',
   'Map imagery: EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel '
-    + 'data 2016), CC BY 4.0, https://maps.eox.at. Tiles dimmed.',
+    + 'data 2016), CC BY 4.0, https://maps.eox.at. Tiles tinted.',
   "Globe imagery: We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services "
     + "(GIBS), part of NASA's Earth Science Data and Information System (ESDIS).",
 ];
@@ -208,6 +208,12 @@ export function listView(list: ListModel, favs: Set<string>, title: string, mode
     hint: mode === 'favs' ? FAV_HINT : LIST_HINT,
   };
 }
+
+/**
+ * Whether a rejected play() means the WebView refused to play without a gesture (a DOMException named NotAllowedError),
+ * not some other failure: the gate's side click then pulses the button instead of tuning in.
+ */
+export const isRefusal = (e: unknown): boolean => e instanceof DOMException && e.name === 'NotAllowedError';
 
 /**
  * One player, two callers. The list plays its pick through `direct`; a Tuner loop still connecting would

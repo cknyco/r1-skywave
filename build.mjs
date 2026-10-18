@@ -5,17 +5,61 @@ import { createHash } from 'node:crypto';
 const serve = process.argv.includes('--serve');
 const out = serve ? 'dist-dev' : 'dist';   // the dev server never clobbers the release build
 const QR_LIB = 'node_modules/qrcode-generator/qrcode.js';   // the probe's QR encoder, served next to it (no CDN)
+const TARGET = 'chrome101';
+
+/** The CSS that app.js embeds as text, minified (comments and whitespace out) in release and dev builds alike. */
+const minCss = {
+  name: 'min-css',
+  setup(build) {
+    build.onLoad({ filter: /\.css$/ }, async args => {
+      const { code } = await esbuild.transform(readFileSync(args.path, 'utf8'), { loader: 'css', minify: true, target: TARGET });
+      return { contents: code, loader: 'text' };
+    });
+  },
+};
+
+// Files built as ES modules of their own next to app.js, which imports them by URL when it needs them
+// (src/platform/lazy.ts): [the define app.js reads the URL from, the source, the output file].
+const LAZY = [
+  ['__CITIES_JS__', 'src/voice/cities.ts', 'cities.js'],   // the voice city list, loaded from the first voice hold
+  ['__GL_JS__', 'src/map/gl/globe-gl.ts', 'globe-gl.js'],   // the WebGL globe, loaded where WebGL exists
+];
+
+const hashOf = file => createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 8);
+
+/**
+ * Builds the lazily loaded entries before app.js and returns app.js's defines: each URL hashed like app.js's own
+ * (`cities.js?v=<hash>`), or plain in --serve, where every entry gets a watch context of its own.
+ */
+async function buildLazy() {
+  const define = {};
+  for (const [name, entry, file] of LAZY) {
+    const opts = { entryPoints: [entry], bundle: true, format: 'esm', target: TARGET, outfile: `${out}/${file}`, logLevel: 'info' };
+    if (serve) {
+      const ctx = await esbuild.context(opts);
+      await ctx.rebuild();
+      await ctx.watch();
+      define[name] = JSON.stringify(file);
+    } else {
+      await esbuild.build({ ...opts, minify: true });
+      define[name] = JSON.stringify(`${file}?v=${hashOf(`${out}/${file}`)}`);
+    }
+  }
+  return define;
+}
+
+rmSync(out, { recursive: true, force: true });   // start clean: no files left over from earlier builds
+
 const options = {
   entryPoints: ['src/main.ts'],
   bundle: true,
   format: 'iife',
-  target: 'chrome101',
+  target: TARGET,
   outfile: `${out}/app.js`,
-  loader: { '.css': 'text' },
+  plugins: [minCss],
+  define: await buildLazy(),
   logLevel: 'info',
 };
-
-rmSync(out, { recursive: true, force: true });   // start clean: no files left over from earlier builds
 
 function copyStatic(appSrc) {
   mkdirSync(out, { recursive: true });
@@ -44,6 +88,5 @@ if (serve) {
   console.log(`view:    http://localhost:${port}/dev/view.html`);
 } else {
   await esbuild.build({ ...options, minify: true });
-  const hash = createHash('sha256').update(readFileSync('dist/app.js')).digest('hex').slice(0, 8);
-  copyStatic(`app.js?v=${hash}`);
+  copyStatic(`app.js?v=${hashOf('dist/app.js')}`);
 }

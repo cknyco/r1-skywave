@@ -1,7 +1,7 @@
-import { IMAGERY_DIM } from '../config';
 import { type Cam, MAX_LAT, project, TILE, worldSize } from '../geo/mercator';
 import { RAD } from '../geo/sphere';
 import type { Flight } from './camera';
+import { tintCanvas } from './tint';
 
 export interface TileSource {
   url(z: number, x: number, y: number): string;
@@ -150,7 +150,7 @@ export class TileLayer {
   /**
    * Draws the w×h CSS-pixel view onto a canvas whose backing store is s times that size; leaves the transform at identity.
    * With fetch false no Image is created. A missing tile shows its loaded parent, else the base (Ruling 46), else the
-   * dark ground.
+   * dark ground; all of it tinted.
    */
   draw(ctx: CanvasRenderingContext2D, cam: Cam, w: number, h: number, s = 1, fetch = true): void {
     const W = Math.round(w * s), H = Math.round(h * s);
@@ -171,9 +171,6 @@ export class TileLayer {
         break;
       }
     }
-    if (IMAGERY_DIM < 1) {
-      ctx.fillStyle = `rgba(4,6,12,${(1 - IMAGERY_DIM).toFixed(2)})`;
-      ctx.fillRect(0, 0, W, H);
-    }
+    tintCanvas(ctx, W, H);   // look A's blue marble, over the tiles, the base and the ground alike
   }
 }

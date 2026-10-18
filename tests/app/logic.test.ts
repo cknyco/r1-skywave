@@ -8,7 +8,7 @@ import { FAV_HEADER, NEW_HEADER, newList, placeList } from '../../src/ui/news';
 import { createMatcher } from '../../src/voice/match';
 import {
   ABOUT, ABOUT_HINT, ABOUT_TITLE, DIAG_EMPTY, DIAG_TITLE, EMPTY_FAVS, EMPTY_NEW, FAV_HINT, HINT, LIST_HINT, NOTE, countryName,
-  lastOf, listTitle, listView, localTime, msToNextMinute, placeForIntent, playable, sharePlayer, startPlace,
+  isRefusal, lastOf, listTitle, listView, localTime, msToNextMinute, placeForIntent, playable, sharePlayer, startPlace,
   stationCount, statusText, stripModel, viewport, whereLine,
 } from '../../src/app/logic';
 
@@ -270,6 +270,15 @@ function fakePlayer() {
   };
   return { p, calls };
 }
+
+describe('the gate', () => {
+  it('isRefusal: only a NotAllowedError means the WebView refused to play', () => {
+    expect(isRefusal(new DOMException('no gesture', 'NotAllowedError'))).toBe(true);
+    expect(isRefusal(new DOMException('no source', 'NotSupportedError'))).toBe(false);
+    expect(isRefusal(new Error('NotAllowedError'))).toBe(false);
+    expect(isRefusal(undefined)).toBe(false);
+  });
+});
 
 describe('sharePlayer', () => {
   afterEach(() => vi.useRealTimers());

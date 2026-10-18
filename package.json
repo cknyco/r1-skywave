@@ -15,6 +15,7 @@
     "cities": "tsx scripts/make-cities.ts",
     "qr": "node scripts/make-qr.mjs",
     "e2e": "playwright test",
+    "white-check": "tsx scripts/white-check.ts",
     "budgets": "node scripts/check-budgets.mjs"
   },
   "devDependencies": {

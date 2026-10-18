@@ -1,5 +1,12 @@
 import { expect, type Page } from '@playwright/test';
 
+/** The app at `query` (Berlin by default), past the "Tap to tune in" gate: start() has bound the controls and the drag. */
+export async function tuneIn(page: Page, query = '?place=Berlin'): Promise<void> {
+  await page.goto(`/${query}`);
+  await page.click('#start');
+  await expect(page.locator('#gate')).toBeHidden();
+}
+
 /**
  * Ruling 49: the wheel is the volume until the ✈ button turns fly mode on. This taps ✈ only when fly mode is off,
  * since a second tap would end it, and waits for the lit button. Fly mode then lasts FLY_MS of rest after the tap or

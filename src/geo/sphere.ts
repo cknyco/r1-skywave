@@ -5,6 +5,12 @@ export type Vec3 = [number, number, number];
 
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
+/** 0 below a, 1 above b, the cubic ease between them (GLSL's smoothstep). */
+export function smoothstep(a: number, b: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
 /** Unit vector: x east (lon 90), y north, z toward lon 0 on the equator. */
 export function toVec(lon: number, lat: number): Vec3 {
   const c = Math.cos(lat * RAD);

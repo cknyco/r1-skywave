@@ -4,11 +4,21 @@
 #              (read-only), builds the station data from Radio Browser keeping the stations the previous
 #              snapshot had or recently lost (falls back to the dataset already live when that fails),
 #              compares it with the day base to write data/new.json and the change log, builds and tests
-#              the app, and uploads the Pages artifact plus a data-log artifact.
+#              the app, checks fresh data for white in a real browser (below), and uploads the Pages
+#              artifact plus a data-log artifact.
 #   deploy     (pages: write, id-token: write)  publishes the Pages artifact.
 #   changelog  (contents: write)  commits snapshot.json, day-base.json and changes/ to branch data-log
-#              (never main); runs only when the build produced fresh data, not the live fallback. Its
-#              nightly pushes count as repository activity, so GitHub keeps the schedule enabled.
+#              (never main); runs only when the build deploys fresh data: not the live fallback, not
+#              data the white check turned away. Its nightly pushes count as repository activity, so
+#              GitHub keeps the schedule enabled.
+# The white check (fresh data only, after the build and `pnpm test`): e2e/white.spec.ts alone, headless and
+# muted in Playwright's Chromium, on the data just built (scripts/white-check.ts). A white pixel (smallest
+# channel 215 or more) in any view means that data must not deploy: the build deploys the last live dataset
+# instead, as when Radio Browser fails (a ::warning:: names the views and values), and the changelog job
+# skips that night, so data-log records only deployed data. Without WebGL on the runner the WebGL views
+# skip (::notice::) and the Canvas 2D views decide. When the check cannot run or decide (browser install,
+# the check itself), the fresh data deploys unchecked with a ::warning::. The white model in `pnpm test`
+# (tests/map/lightsdata.test.ts) is advisory: it warns, it never blocks.
 name: pages
 on:
   push:
@@ -24,7 +34,8 @@ jobs:
     permissions:
       contents: read
     outputs:
-      fresh: ${{ steps.data.outcome }}
+      # 'success' only when the build deploys fresh data: not the live fallback, not data the white check turned away.
+      fresh: ${{ steps.white.outputs.verdict == 'white' && 'white' || steps.data.outcome }}
     steps:
       - uses: actions/checkout@v7
       - run: git fetch --depth=1 origin data-log:refs/remotes/origin/data-log || true
@@ -59,10 +70,39 @@ jobs:
             --log log --date "$(date -u +%F)"
       - run: pnpm run build
       - run: pnpm test
+      # The white check (header): fresh data only; the live fallback is the dataset already deployed.
+      - if: steps.data.outcome == 'success'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - id: browser
+        if: steps.data.outcome == 'success'
+        run: pnpm exec playwright install --with-deps chromium
+        continue-on-error: true
+      - id: white
+        name: White check (e2e/white.spec.ts on the fresh data)
+        if: steps.browser.outcome == 'success'
+        run: pnpm run white-check
+        timeout-minutes: 15
+        continue-on-error: true
+      - if: steps.browser.outcome == 'failure' || (steps.white.outcome == 'failure' && !steps.white.outputs.verdict)
+        run: echo "::warning::The white check could not run (browser install or the check itself failed) — deploying the fresh data unchecked"
+      - name: White on the fresh data — deploy the last live dataset instead
+        if: steps.white.outputs.verdict == 'white'
+        env: { VIEWS: '${{ steps.white.outputs.views }}' }
+        run: |
+          echo "::warning::White on the fresh data ($VIEWS) — deploying the last live dataset; data-log is not updated tonight"
+          rm -rf public/data
+          pnpm run data:live
+          curl -fsS --retry 2 https://cknyco.github.io/r1-skywave/data/new.json -o "$RUNNER_TEMP/new.json" \
+            && mv "$RUNNER_TEMP/new.json" public/data/new.json || echo "no live new.json to keep"
+          pnpm run build
+          pnpm test
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with: { path: dist }
-      - if: steps.data.outcome == 'success'
+      - if: steps.data.outcome == 'success' && steps.white.outputs.verdict != 'white'
         uses: actions/upload-artifact@v7
         with: { name: data-log, path: log, include-hidden-files: false, retention-days: 3 }
 

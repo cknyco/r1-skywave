@@ -1,14 +1,15 @@
 import type { Cam } from '../geo/mercator';
-import { angleBetween, fromVec, lerp, RAD, slerp, toVec, type Vec3 } from '../geo/sphere';
+import { angleBetween, fromVec, lerp, RAD, slerp, toVec, wrapLon, type Vec3 } from '../geo/sphere';
 
 export const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
 
 export interface Flight { from: Cam; to: Cam; a: Vec3; b: Vec3; t0: number; dur: number; peakZ: number }
 
-export function planFlight(from: Cam, to: Cam, t0: number): Flight {
+/** A flight from one camera to another; a glide (glide true) is always the short hop, however far it goes. */
+export function planFlight(from: Cam, to: Cam, t0: number, glide = false): Flight {
   const a = toVec(from.lon, from.lat), b = toVec(to.lon, to.lat);
   const om = angleBetween(a, b);
-  const short = om < 2 * RAD;
+  const short = glide || om < 2 * RAD;
   const dn = Math.min(1, om / Math.PI);
   return {
     from, to, a, b, t0,
@@ -24,4 +25,9 @@ export function sampleFlight(f: Flight, now: number): { cam: Cam; done: boolean 
   const p = fromVec(slerp(f.a, f.b, e));
   const z = e < 0.5 ? lerp(f.from.z, f.peakZ, e * 2) : lerp(f.peakZ, f.to.z, (e - 0.5) * 2);
   return { cam: { lon: p.lon, lat: p.lat, z }, done: false };
+}
+
+/** The camera is on lon/lat: the glide's end, judged on the camera, not on screen pixels a renderer may quantise. */
+export function atPlace(cam: Cam, lon: number, lat: number): boolean {
+  return Math.abs(wrapLon(cam.lon - lon)) < 1e-6 && Math.abs(cam.lat - lat) < 1e-6;
 }

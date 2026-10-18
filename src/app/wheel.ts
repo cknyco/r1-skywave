@@ -41,7 +41,7 @@ export const flyEnds = (s: Fly): number => (s.mode === 'fly' && !s.moving ? s.at
 /** Storage key of the volume (per cent). */
 export const VOLUME_KEY = 'volume';
 export const VOLUME_MUTED = 'muted';
-export const VOLUME_MAX_NOTE = "The r1's own volume sets the maximum.";
+export const VOLUME_MAX_NOTE = 'Louder: r1 Settings › Sound › Volume';
 
 const clamp = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
 

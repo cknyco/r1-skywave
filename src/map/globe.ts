@@ -1,15 +1,21 @@
-import { IMAGERY_DIM } from '../config';
 import type { Places } from '../data/store';
 import { RAD } from '../geo/sphere';
-import { worldSize } from '../geo/mercator';
+import { flatness, globeRadius, mercY, pxPerRad } from '../geo/mercator';
+import { orthoPlaces } from './gl/frame';
 import type { ScreenDot } from './lod';
+import { tintTexture } from './tint';
 
-// Limb shading by q = dx² + dy² (squared distance from the disc centre), tabulated: Math.pow per pixel was the costliest step.
+// Limb shading by q = dx² + dy² (squared distance from the disc centre), tabulated: Math.pow per pixel was the costliest
+// step. 256 (the texel as it is) at the centre, 35 % at the limb.
 const SHADE_N = 4096;
 const SHADE = new Uint16Array(SHADE_N);
-for (let k = 0; k < SHADE_N; k++) SHADE[k] = (256 * IMAGERY_DIM * (0.35 + 0.65 * Math.pow(Math.sqrt(1 - k / SHADE_N), 0.6))) | 0;
+for (let k = 0; k < SHADE_N; k++) SHADE[k] = (256 * (0.35 + 0.65 * Math.pow(Math.sqrt(1 - k / SHADE_N), 0.6))) | 0;
 
-/** Orthographic globe drawn pixel by pixel into a w×h buffer (1 px per CSS px; the view upscales it to the canvas). */
+/**
+ * Orthographic globe drawn pixel by pixel into a w×h buffer (1 px per CSS px; the view upscales it to the canvas). From
+ * FLAT_FROM it flattens into the tiles' Web Mercator as the WebGL globe does (flatness), so zoom 4 hands over to the
+ * tiles without a jump; its disc then covers the screen (R ≥ 449 px) and its limb shading is within 2 levels of flat.
+ */
 export class Globe {
   private np = 0;
   private cx = 0;
@@ -21,14 +27,19 @@ export class Globe {
   private NY = new Float32Array(0);
   private NZ = new Float32Array(0);
   private SH = new Uint16Array(0);
-  private U0 = new Int32Array(0);
+  private U0 = new Int32Array(0);   // texture column, in 1/256 texel (24.8 fixed point)
   private V = new Int32Array(0);
-  private uvLat = NaN;
+  private uvLat = NaN;   // the latitude the texture coordinates are for (NaN: none); flat changes clear it
+  private k = 1;         // Web Mercator CSS px per radian at the zoom
+  private flat = 0;      // flatness at the zoom
+  private tinted?: Uint32Array;   // the texture in look A's blue marble, made on the first render
+  private tex?: Uint32Array;      // the texture as loaded, until its tinted copy exists (then about 8 MB freed on the r1)
   R = 0;
   w = 0;
   h = 0;
 
-  constructor(private tex: Uint32Array, private TW: number, private TH: number, w: number, h: number) {
+  constructor(tex: Uint32Array, private TW: number, private TH: number, w: number, h: number) {
+    this.tex = tex;
     this.resize(w, h);
   }
 
@@ -54,9 +65,14 @@ export class Globe {
     this.uvLat = NaN;
   }
 
-  /** Radius matching Web Mercator scale at the centre latitude, so the globe→tiles hand-over lines up. */
+  /**
+   * The radius for zoom z at latitude lat: globeRadius, rounded to whole pixels (the WebGL globe's, give or take ½ px);
+   * the Web Mercator scale k and the flatness for z.
+   */
   setZoom(z: number, lat: number): void {
-    const R = Math.round(worldSize(z) / (2 * Math.PI * Math.max(0.2, Math.cos(lat * RAD))));
+    const R = Math.round(globeRadius(z, lat)), flat = flatness(z);
+    this.k = pxPerRad(z);
+    if (flat !== this.flat) { this.flat = flat; this.uvLat = NaN; }
     if (R === this.R) return;
     this.R = R;
     const { w, h, cx, cy, ROW0, ROWN, PIX, NX, NY, NZ, SH } = this;
@@ -76,51 +92,52 @@ export class Globe {
     this.uvLat = NaN;
   }
 
-  /** Texture coordinates for every disc pixel. Each row is mirror-symmetric about cx, so only its left half is computed. */
+  /**
+   * Texture coordinates for every disc pixel: the orthographic inverse mixed by flat, as the shader does, with the Web
+   * Mercator one (longitude dx/k per column, latitude one exp/atan per row). Each row is mirror-symmetric about cx in
+   * both, so only its left half is computed.
+   */
   private buildUV(lat0: number): void {
-    const p = lat0 * RAD, cp = Math.cos(p), sp = Math.sin(p), { TW, TH, h, ROW0, ROWN, NX, NY, NZ, U0, V } = this;
+    const p = lat0 * RAD, cp = Math.cos(p), sp = Math.sin(p), { TW, TH, h, cy, R, k, flat, ROW0, ROWN, NX, NY, NZ, U0, V } = this;
+    const T = 256 * TW, m0 = mercY(p);
     for (let y = 0; y < h; y++) {
-      const i0 = ROW0[y], n = ROWN[y];
-      for (let k = 0; k < (n + 1) >> 1; k++) {
-        const i = i0 + k, j = i0 + n - 1 - k;
-        const vx = NX[i], vy = cp * NY[i] + sp * NZ[i], vz = -sp * NY[i] + cp * NZ[i];
-        U0[i] = ((Math.atan2(vx, vz) / Math.PI + 1) * 0.5 * TW) | 0;
-        V[i] = Math.min(TH - 1, ((0.5 - Math.asin(Math.max(-1, Math.min(1, vy))) / Math.PI) * TH) | 0);
-        if (j === i) continue;   // the middle pixel of an odd span is its own mirror
-        U0[j] = TW - 1 - U0[i];   // the mirror pixel has -vx: atan2 flips sign, u becomes TW - u (±1 texel after flooring)
-        V[j] = V[i];
+      const i0 = ROW0[y], n = ROWN[y], vm = 1 - (2 / Math.PI) * Math.atan(Math.exp(m0 + (cy - y - 0.5) / k));
+      for (let j = 0; j < (n + 1) >> 1; j++) {
+        const i = i0 + j, o = i0 + n - 1 - j;
+        const vx = NX[i], vy = cp * NY[i] + sp * NZ[i], vz = -sp * NY[i] + cp * NZ[i], u = Math.atan2(vx, vz);
+        U0[i] = ((0.5 + (u + flat * ((vx * R) / k - u)) / (2 * Math.PI)) * T) | 0;
+        const v = 0.5 - Math.asin(Math.max(-1, Math.min(1, vy))) / Math.PI;
+        V[i] = Math.min(TH - 1, ((v + flat * (vm - v)) * TH) | 0);
+        if (o === i) continue;   // the middle pixel of an odd span is its own mirror
+        U0[o] = T - 1 - U0[i];   // the mirror pixel has -vx (and -dx): u becomes T - u (±1 after flooring)
+        V[o] = V[i];
       }
     }
     this.uvLat = lat0;
   }
 
+  /** The latitude both renderLand and project draw at lat: exact once flattening, else on the ¼° step. */
+  private latAt(lat: number): number {
+    return this.flat ? lat : Math.round(lat * 4) / 4;
+  }
+
   renderLand(buf: Uint32Array, lon: number, lat: number): void {
     buf.fill(0xff0d0806);
-    const latQ = Math.round(lat * 4) / 4;
+    const latQ = this.latAt(lat);
     if (latQ !== this.uvLat) this.buildUV(latQ);
-    const du = Math.round((lon / 360) * this.TW), mask = this.TW - 1, { tex, TW, PIX, U0, V, SH } = this;
+    if (!this.tinted) { this.tinted = tintTexture(this.tex!); this.tex = undefined; }
+    const tex = this.tinted;
+    const du = Math.round((lon / 360) * 256 * this.TW), mask = this.TW - 1, { TW, PIX, U0, V, SH } = this;
     for (let i = 0; i < this.np; i++) {
-      const c = tex[V[i] * TW + ((U0[i] + du) & mask)], s = SH[i];
+      const c = tex[V[i] * TW + (((U0[i] + du) >> 8) & mask)], s = SH[i];
       buf[PIX[i]] = 0xff000000 | ((((c >>> 16) & 255) * s >> 8) << 16) | ((((c >>> 8) & 255) * s >> 8) << 8) | (((c & 255) * s) >> 8);
     }
   }
 
+  /** The places eligible admits on the visible side, with their depth, as renderLand draws the globe. */
   project(places: Places, eligible: (i: number) => boolean, lon: number, lat: number): ScreenDot[] {
-    const l = -lon * RAD, p = Math.round(lat * 4) / 4 * RAD;
-    const cl = Math.cos(l), sl = Math.sin(l), cp = Math.cos(p), sp = Math.sin(p);
-    const { w, h, cx, cy, R } = this;
-    const out: ScreenDot[] = [];
-    for (let j = 0; j < places.n; j++) {
-      if (!eligible(j)) continue;
-      const la = places.lat[j] * RAD, lo = places.lon[j] * RAD, c = Math.cos(la);
-      const x = c * Math.sin(lo), y = Math.sin(la), z = c * Math.cos(lo);
-      if (-cp * sl * x + sp * y + cp * cl * z <= 0) continue;
-      const vx = cl * x + sl * z, vy = sp * sl * x + cp * y - sp * cl * z;
-      const sx = cx + vx * R, sy = cy - vy * R;
-      if (sx < -8 || sx > w + 8 || sy < -8 || sy > h + 8) continue;
-      out.push({ i: j, x: sx, y: sy, count: places.count[j] });
-    }
-    return out;
+    const { R, w, h, k, flat } = this;
+    return orthoPlaces(places, eligible, { lon, lat: this.latAt(lat), R, w, h, k, flat });
   }
 }
 

@@ -155,6 +155,10 @@ describe('volume (Ruling 49)', () => {
     for (const t of [VOLUME_MAX_NOTE, VOLUME_MUTED]) expect(t.toLowerCase()).not.toContain('garden');
   });
 
+  it('the 100 % note points to the r1 setting', () => {
+    expect(VOLUME_MAX_NOTE).toBe('Louder: r1 Settings › Sound › Volume');
+  });
+
   it('is remembered in the app store (creationStorage on the r1) and read back at boot', async () => {
     const m = new Map<string, string>();
     const kv = createStore({ creationStorage: { plain: {

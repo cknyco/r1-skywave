@@ -2,28 +2,33 @@
 // session, station list and storage, with the map (Task 13) where the preview had its text screen. Task P3 added the
 // voice fast path and log (Ruling 44), the worldwide lists of new stations and favourites (Rulings 45, 47), the
 // never-black tile ground and tile prefetch (Ruling 46), and the resize path. Task P4a made the wheel the volume, with a
-// ✈ fly mode for places (Ruling 49), and put About behind a ⓘ button (Ruling 50).
+// ✈ fly mode for places (Ruling 49), and put About behind a ⓘ button (Ruling 50). The glowing-globe plan's Task 1 lets a
+// side click at the gate tune in, and loads the voice city list as a file of its own (cities.js) on the first voice hold;
+// its Tasks 4 and 5 draw the globe with WebGL (globe-gl.js, another file of its own) where a frame-time probe finds it
+// fast enough, with the Canvas 2D globe as the fallback and the choice in About.
 import css from './ui/styles.css';
 import {
-  NOTE, lastOf, listTitle, listView, msToNextMinute, placeForIntent, playable, sharePlayer, startPlace, stripModel,
-  viewport, type Last, type ListMode,
+  NOTE, isRefusal, lastOf, listTitle, listView, msToNextMinute, placeForIntent, playable, sharePlayer, startPlace,
+  stripModel, viewport, type Last, type ListMode,
 } from './app/logic';
 import { FLY_OFF, VOLUME_KEY, flyEnds, flyNext, readVolume, stepVolume, volumeView, type FlyEvent, type WheelMode } from './app/wheel';
 import { Player } from './audio/player';
 import { createStatic, type Static } from './audio/static';
 import { Tuner } from './audio/tuner';
 import {
-  CONNECT_TIMEOUT_MS, GLOBE_BELOW_ZOOM, NEIGHBOUR_PREFETCH, PREFETCH_DELAY_MS, RB_BASE, SETTLE_MS, TEXTURE_URL,
-  VOLUME_SAVE_MS, ZOOM_DEFAULT,
+  CITIES_WAIT_MS, CONNECT_TIMEOUT_MS, GATE_TRY_MS, GL_PROBE_FRAMES, GLOBE_BELOW_ZOOM, NEIGHBOUR_PREFETCH,
+  PREFETCH_DELAY_MS, RB_BASE, SETTLE_MS, TEXTURE_URL, VOLUME_SAVE_MS, ZOOM_DEFAULT,
 } from './config';
 import { DataStore, type NewStation, type StationRow } from './data/store';
 import { bindControls, type Action } from './input/controls';
+import { globeMode, loadGlGlobe, probeVerdict } from './map/gl-load';
 import { Globe, loadTexture } from './map/globe';
 import { minCountForZoom } from './map/lod';
 import { TILE_SOURCE } from './map/tile-source';
 import { mercatorBase, TileLayer } from './map/tiles';
 import { MapView, viewSize } from './map/view';
 import { buildWalk, stepWalk } from './map/walk';
+import { lazyImport } from './platform/lazy';
 import {
   askLLM, installKeyboardFallback, installMessageHook, onPluginMessage, startVoice, stopVoice, type PluginMessage,
 } from './platform/r1';
@@ -80,8 +85,20 @@ async function boot(): Promise<() => void> {
   let news: NewStation[] = [];
   let voiceOn = false;
   let about = false;
-  let matcher: Matcher | null = null;
-  const match = () => (matcher ??= createMatcher(places));   // built on the first voice search, not at boot
+  let globeLine = 'globe: starting';   // About's first line: the renderer the globe uses, and why
+  // The voice city list (decision 2026-10-17) is a file of its own, cities.js, loaded from the first voice hold on.
+  // `cities` is undefined until it has loaded, or null when it failed. match() reads places and countries without it.
+  // A failed load is tried again on the next voice hold (the creation may stay open for days), under a URL of its own:
+  // a browser keeps a module that failed to load as failed for its URL.
+  let cities: string | null | undefined;
+  let citiesLoad: Promise<void> | undefined;
+  let citiesFailed = 0;
+  const loadCities = () => (citiesLoad ??= lazyImport<{ CITIES: string }>(
+    citiesFailed ? `${__CITIES_JS__}${__CITIES_JS__.includes('?') ? '&' : '?'}r=${citiesFailed}` : __CITIES_JS__,
+  ).then(m => { cities = m.CITIES; }, () => { cities = null; citiesLoad = undefined; citiesFailed++; }));
+  let matcher: Matcher | null = null;   // with the list, built on the first voice search once the list is there
+  let bare: Matcher | null = null;      // without it
+  const match = () => (cities ? (matcher ??= createMatcher(places, cities)) : (bare ??= createMatcher(places, '')));
   const diag = new Diag();
 
   // A carried-over favourite is resolved when a chunk holding it loads (the start place's, a list, a tune).
@@ -145,12 +162,36 @@ async function boot(): Promise<() => void> {
     onSettle: () => { note = ''; render(); },
     onTimeout: ms => diag.push('result', `timeout after ${ms} ms: back to the station before`),
   });
+  // Ruling P4: bumped on every voice hold and abandon(), so a transcript that waited for the city list can tell whether
+  // the session it belongs to is still the live one.
+  let voiceGen = 0;
+  const abandon = () => { voiceGen++; voice.abandon(); };
 
   const { w, h } = viewSize(screen.canvas);
   const globe = new Globe(texture.tex, texture.TW, texture.TH, w, h);
   const tiles = new TileLayer(TILE_SOURCE, () => map.wake());   // a tile only loads after the map asked for it
   tiles.base = mercatorBase(texture.tex, texture.TW, texture.TH);   // Ruling 46: the globe's imagery under the tiles
   const map = new MapView(screen.canvas, places, globe, tiles, p => onPick(p));
+  // The WebGL globe: forced by ?globe=gl or ?globe=mediump, or in auto mode where its probe (GL_PROBE_FRAMES frames on
+  // the still hidden canvas, usually behind the gate) finds it fast enough. Until it is decided, and whenever it cannot
+  // draw, the Canvas 2D globe does. About names the choice in `globeLine`, once per run. Only the texture's data goes
+  // along (a view of the same buffer, no copy), so nothing here keeps `texture` alive. The Canvas 2D globe lets go of
+  // the untinted data once tinted; a WebGL globe in use keeps it, to rebuild after a lost context.
+  const glMode = globeMode(location.search);
+  const fallback = (why: string) => { globeLine = `globe: Canvas 2D, ${why}`; };
+  void loadGlGlobe(__GL_JS__, screen.glCanvas, glMode, { data: new Uint8Array(texture.tex.buffer), w: texture.TW, h: texture.TH }, map.glow)
+    .then(async g => {
+      let line = `globe: ${g.info}, forced`;
+      g.onState = ok => { if (ok) globeLine = line; else fallback('context lost'); map.wake(); };   // a loss in the probe too
+      if (glMode === 'auto') {
+        let why = '';   // an error in the probe's frames
+        const v = probeVerdict(await g.probe(GL_PROBE_FRAMES, () => map.drawProbe(g)).catch((e: Error) => { why = `probe: ${e.message}`; return []; }));
+        if (why || !v.ok || !g.ok) { fallback(why || (g.ok ? `slow (${v.median.toFixed(1)} ms)` : 'context lost')); g.dispose(); return; }
+        line = `globe: ${g.info}, ${v.median.toFixed(1)} ms`;
+      }
+      globeLine = line;
+      map.useGl(g);
+    }, (e: Error) => fallback(e.message));
 
   // Ruling 49: fly mode (src/app/wheel.ts), lit on the ✈ button. The map's flights feed it whatever the mode; a timer
   // at flyEnds ends it once the map has rested FLY_MS since the tap or the last wheel step.
@@ -207,7 +248,7 @@ async function boot(): Promise<() => void> {
   };
 
   const go = (p: number, resumeId?: string) => {
-    voice.abandon();   // a scroll, drag or jump (the voice-found one has already ended the session) must not resume later
+    abandon();   // a scroll, drag or jump (the voice-found one has already ended the session) must not resume later
     cur = p;
     note = '';
     picked = null;
@@ -230,7 +271,7 @@ async function boot(): Promise<() => void> {
   const jump = (p: number) => map.select(p, Math.max(map.cam.z, ZOOM_DEFAULT));
 
   const playPick = async (s: StationRow) => {
-    voice.abandon();   // picking from the list mid-session must not have voice resume something else later
+    abandon();   // picking from the list mid-session must not have voice resume something else later
     picked = s;
     const r = await shared.direct(s.url);
     if (r !== 'playing' || picked !== s) return;
@@ -312,11 +353,18 @@ async function boot(): Promise<() => void> {
     }
   };
 
-  const openAbout = () => { flyEvent('close'); about = true; screen.showAbout(true, diag.lines()); };
+  // About also gives the median time of the last globe frames (up to 120), whichever globe drew them: a photo of it on
+  // the r1 then shows whether the globe in use is smooth there, the Canvas 2D fallback above all (findings A5, B5).
+  const openAbout = () => {
+    flyEvent('close');
+    about = true;
+    const ms = map.frameMs.filter((_, i) => map.frameGlobe[i]).sort((a, b) => a - b);
+    screen.showAbout(true, diag.lines(), ms.length ? `${globeLine}, frames ${ms[ms.length >> 1].toFixed(1)} ms` : globeLine);
+  };
   const closeAbout = () => { about = false; screen.showAbout(false); };
 
   const toggle = () => {
-    voice.abandon();   // a side click mid-session must not have voice resume/stop something else later
+    abandon();   // a side click mid-session must not have voice resume/stop something else later
     const stopped = player.state === 'idle' || player.state === 'error';
     if (stopped && picked && picked.place === cur) { void playPick(picked); return; }
     shared.reattach();
@@ -347,9 +395,10 @@ async function boot(): Promise<() => void> {
     else if (a.type === 'voiceStart') {
       flyEvent('close');
       diag.start();
+      voiceGen++;
       voice.start();               // records "was playing" and stops the radio; the clock is armed later
       voiceOn = startVoice();      // only called after the radio is already stopped
-      if (voiceOn) { note = NOTE.listening; render(); }
+      if (voiceOn) { void loadCities(); note = NOTE.listening; render(); }   // the list comes while the user speaks
       else { voice.end(); diag.push('result', 'voice unavailable'); note = NOTE.noVoice; render(); }   // resume right away
     }
   };
@@ -364,23 +413,40 @@ async function boot(): Promise<() => void> {
   // goes to the LLM. Fix round 1 (I2): "asking for" as Matcher.request reads it, so "play Michael Jackson" is not
   // Jackson; fix rounds 2 and 3 (N2, N3) read the LLM's plain-text answers the same way, sentence by sentence
   // (Matcher.reply). Every bridge message and what came of it goes into the voice log.
+  const search = (text: string) => {
+    if (!cities) diag.push('result', cities === null ? 'city list failed' : 'city list still loading');   // a big city then goes to the LLM
+    const p = match().request(text);
+    if (p >= 0) {
+      diag.push('result', `fast path: ${named(p)}`);
+      voice.resolved(true, found(p));
+    } else if (askLLM(intentPrompt(text))) {
+      diag.push('llm-sent', text);
+      voice.asked();
+      note = NOTE.thinking;
+      render();
+    } else {
+      diag.push('result', 'bridge unavailable');
+      voice.resolved(false);   // the bridge call itself failed: nothing more is coming
+    }
+  };
+
   const onMessage = (m: PluginMessage) => {
     if (m.type === 'sttEnded') {
       diag.push('sttEnded', m);
       if (!voice.transcript()) return;   // an earlier session's transcript, or none expected: changes nothing
       const text = m.transcript?.trim() ?? '';
-      const p = text ? match().request(text) : -1;
-      if (p >= 0) {
-        diag.push('result', `fast path: ${named(p)}`);
-        voice.resolved(true, found(p));
-      } else if (text && askLLM(intentPrompt(text))) {
-        diag.push('llm-sent', text);
-        voice.asked();
-        note = NOTE.thinking;
-        render();
-      } else {
-        diag.push('result', text ? 'bridge unavailable' : 'no transcript');
-        voice.resolved(false);   // no transcript, or the bridge call itself failed: nothing more is coming
+      if (!text) {
+        diag.push('result', 'no transcript');
+        voice.resolved(false);   // nothing more is coming
+      } else if (cities !== undefined) search(text);
+      else {
+        // The city list is still loading: the fast path waits for it up to CITIES_WAIT_MS, then searches without it.
+        // A retry hold, a drag, a scroll or a list pick meanwhile has ended this session: then nothing happens (P4).
+        const gen = voiceGen;
+        void Promise.race([loadCities(), new Promise(r => setTimeout(r, CITIES_WAIT_MS))]).then(() => {
+          if (gen === voiceGen && voice.isLive()) search(text);
+          else diag.push('result', 'ended while waiting for the city list');
+        });
       }
       return;
     }
@@ -407,16 +473,17 @@ async function boot(): Promise<() => void> {
     if (whose === 'accepted' || !voice.isLive()) { note = NOTE.noMatch; render(); }   // an unasked no-match still shows, changes nothing
   };
 
-  // Drag pans; when the map settles, the view picks the place under the ring (onPick → go → tune after SETTLE_MS).
+  // Drag pans; the finger holds the map, so a caught place glides into the ring only once it lets go. The view picks
+  // the place under the ring as it moves (onPick → go → tune after SETTLE_MS).
   const bindDrag = () => {
     let drag: { x: number; y: number } | null = null;
-    screen.canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; });
+    screen.canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; map.hold(true); });
     window.addEventListener('pointermove', e => {
       if (!drag) return;
       map.panBy(e.clientX - drag.x, e.clientY - drag.y);
       drag = { x: e.clientX, y: e.clientY };
     });
-    const end = () => { drag = null; };
+    const end = () => { if (drag) map.hold(false); drag = null; };   // a tap elsewhere (a button) never wakes the map
     window.addEventListener('pointerup', end);
     window.addEventListener('pointercancel', end);
   };
@@ -476,8 +543,29 @@ async function boot(): Promise<() => void> {
 
 const ready = boot();
 ready.catch((e: Error) => screen.fail(e.message));
-screen.onGate(() => {
-  noise = createStatic();              // the AudioContext must be created inside the tap
-  void audio.play().catch(() => {});   // unlocks the element while the tap's activation lasts
+
+// The way in, by a tap on the gate or a side click (below), and only once: the static and the media element are
+// unlocked inside the gesture, then the app starts. The tap has hidden the gate already, so a flag guards it, not
+// gateOpen(): start() must never bind the controls twice.
+let tuned = false;
+const tuneIn = () => {
+  if (tuned) return;
+  tuned = true;
+  screen.closeGate();
+  noise = createStatic();              // the AudioContext must be created inside the gesture
+  void audio.play().catch(() => {});   // unlocks the element while the gesture's activation lasts
   void ready.then(start => start(), () => {});
+};
+screen.onGate(tuneIn);
+
+// A side click at the gate (the r1's hardware button) tunes in like the tap when the WebView lets the app play without
+// a tap. play() on the element with no source tells: a refusal rejects at once with NotAllowedError, and the button
+// pulses to ask for the tap; an allowed play() stays pending, so GATE_TRY_MS without an answer counts as allowed, like
+// a resolve or any other error. The controls are bound later, inside start(), so this press never also plays or stops.
+window.addEventListener('sideClick', () => {
+  if (!screen.gateOpen()) return;
+  void Promise.race([audio.play(), new Promise(r => setTimeout(r, GATE_TRY_MS))]).then(
+    () => { if (screen.gateOpen()) tuneIn(); },   // a tap within GATE_TRY_MS has tuned in already
+    e => { if (screen.gateOpen()) { if (isRefusal(e)) screen.pulseGate(); else tuneIn(); } },
+  );
 });

@@ -46,3 +46,27 @@ export async function fakeStreams(page: Page): Promise<void> {
 export async function newStations(page: Page, body?: object): Promise<void> {
   await page.route('**/data/new.json', r => (body ? r.fulfill({ json: body }) : r.fulfill({ status: 404, body: '' })));
 }
+
+/**
+ * Media play() rejects with NotAllowedError unless the page has a user gesture right now
+ * (navigator.userActivation.isActive), as an Android WebView that requires a gesture does. Register it after fakeStreams.
+ */
+export async function gestureOnly(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+      return navigator.userActivation.isActive
+        ? play.call(this) : Promise.reject(new DOMException('play() needs a user gesture', 'NotAllowedError'));
+    };
+  });
+}
+
+/**
+ * Evaluates `expression` in the page without a user gesture, through a CDP session of its own. page.evaluate, and so
+ * waitForFunction and every locator query, runs as a gesture (Playwright's CDP calls pass userGesture: true): it gives
+ * the page transient activation for the next few seconds, and gestureOnly then lets play() through. Chromium only.
+ */
+export async function noGesture(page: Page): Promise<(expression: string) => Promise<unknown>> {
+  const cdp = await page.context().newCDPSession(page);
+  return async expression => (await cdp.send('Runtime.evaluate', { expression, returnByValue: true })).result.value;
+}

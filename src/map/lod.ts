@@ -1,4 +1,8 @@
-export interface ScreenDot { i: number; x: number; y: number; count: number }
+/** A place on screen (CSS px); z is its depth on the globe (0 at the limb, 1 facing the viewer), absent in the tile view. */
+export interface ScreenDot { i: number; x: number; y: number; count: number; z?: number }
+
+/** CSS px beyond the view where places still count, so that lights just off the edge glow into it. */
+export const MARGIN = 16;
 
 /** Places below this station count are hidden at zoom z. */
 export function minCountForZoom(z: number): number {

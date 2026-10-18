@@ -34,6 +34,7 @@ export function onTap(el: HTMLElement, fn: (e: PointerEvent) => void): void {
  */
 export class AppScreen {
   readonly canvas = byId('map') as HTMLCanvasElement;
+  readonly glCanvas = byId('globe') as HTMLCanvasElement;   // the WebGL globe's, over the map and shown only while it draws
   private app = byId('app');
   private ring = byId('ring');
   private status = byId('status');
@@ -81,6 +82,21 @@ export class AppScreen {
   /** Runs `fn` once, on the first tap on the gate, inside that tap's user activation. */
   onGate(fn: () => void): void {
     this.gate.addEventListener('pointerup', () => { this.gate.hidden = true; fn(); }, { once: true });
+  }
+
+  /** Whether the "Tap to tune in" gate still covers the app. */
+  gateOpen(): boolean { return !this.gate.hidden; }
+  closeGate(): void { this.gate.hidden = true; }
+
+  /**
+   * The WebView refused a side click's play() at the gate: the button pulses twice (larger, its border white) to ask
+   * for the tap. Web Animations, not a CSS class, so every side click starts it again.
+   */
+  pulseGate(): void {
+    byId('start').animate(
+      [{ transform: 'scale(1)' }, { transform: 'scale(1.08)', borderColor: '#fff' }, { transform: 'scale(1)' }],
+      { duration: 450, iterations: 2 },
+    );
   }
 
   /** Ruling 38: before the tap, offer to resume the station remembered from last time instead of the default label. */
@@ -163,11 +179,15 @@ export class AppScreen {
     }));
   }
 
-  /** Opens the About screen at its top with the voice log (Ruling 44), oldest line first; or closes it. */
-  showAbout(open: boolean, diag: string[] = []): void {
+  /**
+   * Opens the About screen at its top with the globe line (the renderer the map uses, and why) and the voice log
+   * (Ruling 44), oldest line first; or closes it.
+   */
+  showAbout(open: boolean, diag: string[] = [], globe?: string): void {
     this.about.hidden = !open;
     if (!open) return;
     this.diag.replaceChildren();
+    if (globe) div(this.diag, '', globe, 'p');
     div(this.diag, 'dhead', DIAG_TITLE, 'p');
     for (const line of diag.length ? diag : [DIAG_EMPTY]) div(this.diag, '', line, 'p');
     this.about.scrollTop = 0;

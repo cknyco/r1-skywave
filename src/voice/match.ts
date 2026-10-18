@@ -42,7 +42,6 @@
 // would send "Taking you to Scotland!" to London, the biggest place of GB.
 import type { Places } from '../data/store';
 import { distanceKm } from '../geo/sphere';
-import { CITIES } from './cities';
 import { fold } from './fold';
 
 /** Never a match on their own: request fillers, radio and genre words, and common words that are also place names. */
@@ -119,7 +118,11 @@ function englishName(cc: string): string {
   }
 }
 
-export function createMatcher(places: Places, cities = CITIES, countryName: (cc: string) => string = englishName): Matcher {
+/**
+ * `cities` is the big-city list of src/voice/cities.ts. The app loads it as a file of its own, cities.js (decision
+ * 2026-10-17), and passes '' until it is there: places and countries match without it, big cities by name do not.
+ */
+export function createMatcher(places: Places, cities: string, countryName: (cc: string) => string = englishName): Matcher {
   const byName = new Map<string, number[]>();   // folded place name → its places
   const big = new Map<string, number>();        // country → its biggest place
   const byCountry = new Map<string, string>();  // folded country name → code
