@@ -1,13 +1,8 @@
 {
-  "added": 53,
+  "added": 24,
   "baseline": false,
   "byCountry": {
-    "AU": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "BE": {
+    "AF": {
       "added": 1,
       "changed": 0,
       "removed": 0
@@ -17,58 +12,38 @@
       "changed": 0,
       "removed": 0
     },
-    "CH": {
+    "CY": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "CN": {
+    "CZ": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "CO": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "DE": {
+    "ES": {
       "added": 2,
       "changed": 0,
       "removed": 0
     },
-    "EC": {
-      "added": 2,
-      "changed": 0,
-      "removed": 0
-    },
-    "GB": {
+    "FR": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "GR": {
-      "added": 3,
+      "added": 2,
       "changed": 0,
       "removed": 0
     },
-    "HU": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "IN": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "IT": {
+    "HT": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "MX": {
-      "added": 1,
+      "added": 2,
       "changed": 0,
       "removed": 0
     },
@@ -77,35 +52,25 @@
       "changed": 0,
       "removed": 0
     },
-    "PH": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "PT": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "SK": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "TH": {
-      "added": 1,
-      "changed": 0,
+    "TR": {
+      "added": 0,
+      "changed": 1,
       "removed": 0
     },
     "US": {
-      "added": 30,
+      "added": 10,
+      "changed": 0,
+      "removed": 0
+    },
+    "UY": {
+      "added": 1,
       "changed": 0,
       "removed": 0
     }
   },
-  "changed": 0,
-  "date": "2026-11-03",
+  "changed": 1,
+  "date": "2026-11-04",
   "removed": 0,
-  "total": 11130,
+  "total": 11154,
   "v": 1
 }
