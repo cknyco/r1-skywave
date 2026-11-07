@@ -1,156 +1,171 @@
 {
-  "added": 48,
+  "added": 39,
   "baseline": false,
   "byCountry": {
+    "AR": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
     "AT": {
-      "added": 0,
+      "added": 2,
       "changed": 0,
       "removed": 1
     },
-    "BR": {
+    "AU": {
       "added": 1,
       "changed": 0,
-      "removed": 2
+      "removed": 0
     },
-    "CA": {
-      "added": 1,
+    "BR": {
+      "added": 4,
       "changed": 0,
       "removed": 1
     },
     "CH": {
       "added": 1,
       "changed": 0,
-      "removed": 1
+      "removed": 0
     },
-    "CM": {
-      "added": 0,
+    "CI": {
+      "added": 1,
       "changed": 0,
-      "removed": 3
+      "removed": 2
     },
     "CN": {
-      "added": 2,
-      "changed": 0,
-      "removed": 2
-    },
-    "DE": {
-      "added": 2,
-      "changed": 1,
-      "removed": 2
-    },
-    "EE": {
-      "added": 1,
+      "added": 0,
       "changed": 0,
       "removed": 1
     },
-    "ES": {
-      "added": 1,
+    "CO": {
+      "added": 0,
+      "changed": 0,
+      "removed": 2
+    },
+    "CR": {
+      "added": 0,
       "changed": 0,
       "removed": 1
     },
-    "FR": {
-      "added": 3,
-      "changed": 0,
-      "removed": 3
-    },
-    "GB": {
-      "added": 3,
+    "CU": {
+      "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "GH": {
+    "DE": {
+      "added": 2,
+      "changed": 0,
+      "removed": 1
+    },
+    "DK": {
       "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "EE": {
+      "added": 0,
+      "changed": 0,
+      "removed": 5
+    },
+    "ES": {
+      "added": 2,
+      "changed": 0,
+      "removed": 2
+    },
+    "FR": {
+      "added": 2,
+      "changed": 0,
+      "removed": 0
+    },
+    "GB": {
+      "added": 2,
       "changed": 0,
       "removed": 0
     },
     "GR": {
+      "added": 0,
+      "changed": 1,
+      "removed": 3
+    },
+    "ID": {
+      "added": 2,
+      "changed": 0,
+      "removed": 0
+    },
+    "IE": {
+      "added": 0,
+      "changed": 0,
+      "removed": 1
+    },
+    "IN": {
       "added": 1,
       "changed": 0,
-      "removed": 2
-    },
-    "HT": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "IL": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "IT": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
+      "removed": 0
     },
     "KR": {
       "added": 0,
       "changed": 0,
-      "removed": 1
+      "removed": 2
     },
     "MX": {
-      "added": 3,
-      "changed": 0,
-      "removed": 1
+      "added": 2,
+      "changed": 3,
+      "removed": 3
     },
     "NG": {
       "added": 0,
-      "changed": 1,
-      "removed": 0
-    },
-    "NI": {
-      "added": 1,
       "changed": 0,
-      "removed": 0
+      "removed": 1
     },
-    "NL": {
+    "NZ": {
       "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "PE": {
-      "added": 0,
       "changed": 0,
       "removed": 1
     },
     "PL": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "PR": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "RO": {
       "added": 2,
       "changed": 0,
       "removed": 0
     },
     "RU": {
-      "added": 0,
+      "added": 2,
       "changed": 0,
       "removed": 1
     },
-    "SE": {
-      "added": 3,
-      "changed": 0,
-      "removed": 7
-    },
-    "TR": {
-      "added": 4,
-      "changed": 0,
-      "removed": 0
-    },
-    "TZ": {
+    "RW": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "US": {
-      "added": 16,
-      "changed": 1,
-      "removed": 1
+    "SE": {
+      "added": 0,
+      "changed": 0,
+      "removed": 6
     },
-    "ZM": {
+    "UA": {
       "added": 0,
       "changed": 0,
       "removed": 1
+    },
+    "US": {
+      "added": 6,
+      "changed": 0,
+      "removed": 4
     }
   },
-  "changed": 3,
-  "date": "2026-11-06",
-  "removed": 35,
+  "changed": 4,
+  "date": "2026-11-07",
+  "removed": 39,
   "total": 11212,
   "v": 1
 }
