@@ -5,19 +5,22 @@
 // ✈ fly mode for places (Ruling 49), and put About behind a ⓘ button (Ruling 50). The glowing-globe plan's Task 1 lets a
 // side click at the gate tune in, and loads the voice city list as a file of its own (cities.js) on the first voice hold;
 // its Tasks 4 and 5 draw the globe with WebGL (globe-gl.js, another file of its own) where a frame-time probe finds it
-// fast enough, with the Canvas 2D globe as the fallback and the choice in About.
+// fast enough, with the Canvas 2D globe as the fallback and the choice in About. After the user's r1 test (2026-10-18)
+// every start shows the whole globe and dives to the place (src/app/intro.ts), and About and the lists hold a history
+// entry for the r1's own back arrow.
 import css from './ui/styles.css';
 import {
   NOTE, isRefusal, lastOf, listTitle, listView, msToNextMinute, placeForIntent, playable, sharePlayer, startPlace,
   stripModel, viewport, type Last, type ListMode,
 } from './app/logic';
+import { introZoom, landingZoom, wantsIntro } from './app/intro';
 import { FLY_OFF, VOLUME_KEY, flyEnds, flyNext, readVolume, stepVolume, volumeView, type FlyEvent, type WheelMode } from './app/wheel';
 import { Player } from './audio/player';
 import { createStatic, type Static } from './audio/static';
 import { Tuner } from './audio/tuner';
 import {
-  CITIES_WAIT_MS, CONNECT_TIMEOUT_MS, GATE_TRY_MS, GL_PROBE_FRAMES, GLOBE_BELOW_ZOOM, NEIGHBOUR_PREFETCH,
-  PREFETCH_DELAY_MS, RB_BASE, SETTLE_MS, TEXTURE_URL, VOLUME_SAVE_MS, ZOOM_DEFAULT,
+  CITIES_WAIT_MS, CONNECT_TIMEOUT_MS, GATE_TRY_MS, GL_PROBE_FRAMES, GLOBE_BELOW_ZOOM, INTRO_DIVE_MS, INTRO_MS,
+  NEIGHBOUR_PREFETCH, PREFETCH_DELAY_MS, RB_BASE, SETTLE_MS, TEXTURE_URL, VOLUME_SAVE_MS,
 } from './config';
 import { DataStore, type NewStation, type StationRow } from './data/store';
 import { bindControls, type Action } from './input/controls';
@@ -73,6 +76,8 @@ async function boot(): Promise<() => void> {
   const saveFavs = () => { void saveJson(kv, FAVS_KEY, favsDoc(favs)); };
   const query = new URLSearchParams(location.search).get('place');
   const first = startPlace(places, query, last, Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const landZ = landingZoom(location.search);   // ZOOM_DEFAULT, or ?z= for the comparison on the device
+  const intro = wantsIntro(location.search);    // the whole globe first (not with ?intro=0)
 
   let cur = -1;              // the selected place; only onPick (the view's report) sets it
   let started = false;       // the gate was tapped: audio is unlocked, a pick tunes
@@ -100,6 +105,9 @@ async function boot(): Promise<() => void> {
   let bare: Matcher | null = null;      // without it
   const match = () => (cities ? (matcher ??= createMatcher(places, cities)) : (bare ??= createMatcher(places, '')));
   const diag = new Diag();
+  // 2026-10-18: on the user's r1 the wheel turned the volume right after ✈; desktop Chrome, throttled or not, never
+  // does. The wheel log in About shows what fly mode made of each ✈ tap, wheel step, flight and timer on the device.
+  const wheelLog = new Diag(16, undefined, true);
 
   // A carried-over favourite is resolved when a chunk holding it loads (the start place's, a list, a tune).
   data.onRows = rows => {
@@ -202,6 +210,8 @@ async function boot(): Promise<() => void> {
     const was = fly.mode;
     const now = performance.now();
     fly = flyNext(fly, e, now);
+    const told = `${e} → ${fly.mode}${fly.mode !== 'fly' ? '' : fly.moving ? ' paused' : ` ${Math.round(fly.left)} ms left`}`;
+    if (e === 'tap') wheelLog.start('fly', told); else wheelLog.push(e === 'step' ? 'wheel' : 'fly', told);
     if (fly.mode !== was) screen.setFly(fly.mode === 'fly');
     clearTimeout(flyTimer);
     const end = flyEnds(fly);
@@ -267,8 +277,8 @@ async function boot(): Promise<() => void> {
     else { cur = p; render(); }   // before the gate tap: the strip follows; nothing tunes, nothing is saved
   };
 
-  /** Voice and the worldwide lists jump anywhere: the map arcs there and lands at region zoom or closer. */
-  const jump = (p: number) => map.select(p, Math.max(map.cam.z, ZOOM_DEFAULT));
+  /** Voice and the worldwide lists jump anywhere: the map arcs there and lands at the landing zoom or closer. */
+  const jump = (p: number) => map.select(p, Math.max(map.cam.z, landZ));
 
   const playPick = async (s: StationRow) => {
     abandon();   // picking from the list mid-session must not have voice resume something else later
@@ -291,7 +301,35 @@ async function boot(): Promise<() => void> {
     jump(s.place);   // onPick → go(place, id) → tuner.resume(place, id): this station, not the place's first
   };
 
-  const drawList = () => screen.showList(list && listView(list, favIds(favs), listTitle(list, places.name[cur] ?? '', mode), mode, data.newsDate));
+  // The back-arrow experiment (the user's r1 test, 2026-10-18): the r1's own "← back", outside the page, closes the
+  // creation, and the hand reaches for it to close About or a list. While one of them covers the map, one history entry
+  // stands for it: where the WebView turns the arrow into a step back in the history, that step closes the overlay
+  // (onBack) instead of the creation. Closing it any other way takes the entry off again (history.back(), whose popstate
+  // `popping` counts), so the history never grows; the plain map never has one, so there the arrow still closes the
+  // creation. back() runs only while our entry is the current one: a WebView that ignores history changes nothing.
+  const OVERLAY = 'skywave-overlay';
+  let entry = false;   // our history entry stands for the open overlay
+  let popping = 0;     // our own history.back() calls whose popstate is still to come
+  const syncBack = () => {
+    const open = about || !!list;
+    if (open === entry) return;
+    entry = open;
+    try {
+      if (open) history.pushState(OVERLAY, '');
+      else if (history.state === OVERLAY) { popping++; history.back(); }
+    } catch { /* no history here: the arrow does what it always did */ }
+  };
+  const onBack = () => {
+    if (popping) { popping--; return; }   // our own step back
+    if (!entry) return;                   // not ours: nothing to close
+    entry = false;
+    if (about) closeAbout(); else if (list) closeList();   // that overlay only (a list under About gets an entry again)
+  };
+
+  const drawList = () => {
+    screen.showList(list && listView(list, favIds(favs), listTitle(list, places.name[cur] ?? '', mode), mode, data.newsDate));
+    syncBack();
+  };
   const closeList = () => { listReq++; list = null; mode = 'place'; drawList(); };
 
   /** The place's stations under the two header rows; the station on air is selected when it is in the list. */
@@ -359,9 +397,30 @@ async function boot(): Promise<() => void> {
     flyEvent('close');
     about = true;
     const ms = map.frameMs.filter((_, i) => map.frameGlobe[i]).sort((a, b) => a - b);
-    screen.showAbout(true, diag.lines(), ms.length ? `${globeLine}, frames ${ms[ms.length >> 1].toFixed(1)} ms` : globeLine);
+    screen.showAbout(true, diag.lines(), ms.length ? `${globeLine}, frames ${ms[ms.length >> 1].toFixed(1)} ms` : globeLine,
+      wheelLog.lines());
+    syncBack();
   };
-  const closeAbout = () => { about = false; screen.showAbout(false); };
+  const closeAbout = () => { about = false; screen.showAbout(false); syncBack(); };
+
+  // The start (src/app/intro.ts): the whole globe for INTRO_MS, then the dive. Any input meanwhile ends it where the map
+  // is (the hardware in act(), a finger anywhere): never fight the user.
+  let introTimer: ReturnType<typeof setTimeout> | undefined;
+  const endIntro = () => {
+    clearTimeout(introTimer);
+    introTimer = undefined;
+    window.removeEventListener('pointerdown', endIntro, true);
+  };
+  const startIntro = (p: number) => {
+    const lon = places.lon[p], lat = places.lat[p];
+    map.show({ lon, lat, z: introZoom(lat, map.w, map.h) });
+    window.addEventListener('pointerdown', endIntro, true);
+    introTimer = setTimeout(() => {
+      endIntro();
+      map.flyTo(lon, lat, landZ, false, INTRO_DIVE_MS);
+      prefetchNeighbours();   // the one go() armed gave up on the globe; this one waits for the landing
+    }, INTRO_MS);
+  };
 
   const toggle = () => {
     abandon();   // a side click mid-session must not have voice resume/stop something else later
@@ -372,6 +431,7 @@ async function boot(): Promise<() => void> {
   };
 
   const act = (a: Action) => {
+    endIntro();
     if (a.type === 'voiceEnd') {
       if (!voiceOn) return;
       voiceOn = false;
@@ -510,7 +570,7 @@ async function boot(): Promise<() => void> {
   });
 
   if (first >= 0) {
-    map.cam = { lon: places.lon[first], lat: places.lat[first], z: map.cam.z };
+    map.cam = { lon: places.lon[first], lat: places.lat[first], z: landZ };   // behind the gate: the landing's tiles load
     map.select(first);   // onPick sets `cur`; the gate tap tunes it
   }
   map.wake();
@@ -537,6 +597,8 @@ async function boot(): Promise<() => void> {
     window.addEventListener('visibilitychange', () => { if (document.hidden) leave(); });
     window.addEventListener('pagehide', leave);
     window.addEventListener('backHome', leave);   // the r1 platform's own "leaving the creation" signal
+    window.addEventListener('popstate', onBack);
+    if (cur >= 0 && intro) startIntro(cur);
     if (cur >= 0) go(cur, resumeStation?.id);
   };
 }

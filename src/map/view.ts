@@ -118,14 +118,24 @@ export class MapView {
 
   /**
    * Flies to lon/lat at zoom z; a landing in tile mode requests its tiles right away (Ruling 46). A glide is the short
-   * 500 ms hop at any zoom, and the next rest does not glide again.
+   * 500 ms hop at any zoom, and the next rest does not glide again; ms > 0 is a flight of ms whose zoom eases straight
+   * there (planFlight). Never farther out than ZOOM_MIN, or than the map is now (the start's whole globe is): from there
+   * "−" and a glide keep the zoom instead of zooming in.
    */
-  flyTo(lon: number, lat: number, z = this.cam.z, glide = false): void {
-    const to = { lon, lat, z: Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)) };
-    this.flight = planFlight(this.cam, to, performance.now(), glide);
+  flyTo(lon: number, lat: number, z = this.cam.z, glide = false, ms = 0): void {
+    const to = { lon, lat, z: Math.max(Math.min(ZOOM_MIN, this.cam.z), Math.min(ZOOM_MAX, z)) };
+    this.flight = planFlight(this.cam, to, performance.now(), glide, ms);
     this.glided = glide;
     this.moving = true;
     if (to.z >= GLOBE_BELOW_ZOOM) this.tiles.prefetch(to, this.w, this.h, this.dpr, LANDING_PREFETCH);
+    this.wake();
+  }
+
+  /** Shows cam at once, ending any flight (the start's whole globe); the selection stays as it is. */
+  show(cam: Cam): void {
+    this.flight = null;
+    this.moving = false;
+    this.cam = cam;
     this.wake();
   }
 

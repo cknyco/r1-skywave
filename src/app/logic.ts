@@ -40,6 +40,8 @@ export const ABOUT_HINT = 'wheel: scroll · tap or side: close';
 /** The voice log under the credits (Ruling 44): the last bridge events of voice searches, for a photo from the device. */
 export const DIAG_TITLE = 'Voice log (ms since the hold, event, message):';
 export const DIAG_EMPTY = 'No voice search yet.';
+export const WHEEL_TITLE = 'Wheel log (ms since ✈, event → wheel mode):';
+export const WHEEL_EMPTY = 'No wheel event yet.';
 
 /** Storage key 'last'. `id` (Ruling 38) is newer than `place`/`name`/`cc` — an older save simply has no `id`. */
 export interface Last { place: number; name?: string; cc?: string; id?: string }

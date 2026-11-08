@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { fakeStreams, offline } from './net';
-import { fly } from './ui';
+import { fly, noIntro } from './ui';
 
 // The r1 is roughly 6-10x slower than a desktop (Ruling 36). This checks the wheel walk still
 // updates the place and the strip promptly under that load, not just at full desktop speed.
@@ -13,7 +13,7 @@ test.beforeEach(async ({ page }) => {
 test('wheel walk changes place within 500ms at 6x CPU throttling', async ({ page }) => {
   test.setTimeout(60000);   // generous overall budget; the per-step budget below stays tight
 
-  await page.goto('/?place=Berlin');
+  await page.goto(`/${noIntro('?place=Berlin')}`);
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
 

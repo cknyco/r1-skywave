@@ -6,9 +6,10 @@
 import type { PluginMessage } from '../platform/r1';
 import type { Reply } from './intent';
 
-export type DiagKind = 'voice' | 'sttStarted' | 'sttEnded' | 'llm-sent' | 'llm-reply' | 'result' | 'other';
+export type DiagKind = 'voice' | 'sttStarted' | 'sttEnded' | 'llm-sent' | 'llm-reply' | 'result' | 'other' | 'fly' | 'wheel';
 
-export interface DiagEntry { t: number; kind: DiagKind; text: string }
+/** `n`: how many times in a row this entry happened (a collapsing log counts repeats instead of adding lines). */
+export interface DiagEntry { t: number; kind: DiagKind; text: string; n: number }
 
 const MAX_TEXT = 80;
 
@@ -30,23 +31,28 @@ export function kindOf(m: PluginMessage, r: Reply): DiagKind {
   return r.kind === 'intent' || r.kind === 'text' ? 'llm-reply' : 'other';
 }
 
-/** Ring buffer of the last `max` events. `now` is injectable for tests. */
+/**
+ * Ring buffer of the last `max` events. `now` is injectable for tests. `collapse`: an event equal to the last one
+ * (kind and text) counts as a repeat of it ("×3") instead of a new line, so a turn of the wheel takes one line.
+ */
 export class Diag {
   private items: DiagEntry[] = [];
   private t0: number;
 
-  constructor(private max = 12, private now: () => number = () => performance.now()) {
+  constructor(private max = 12, private now: () => number = () => performance.now(), private collapse = false) {
     this.t0 = now();
   }
 
-  /** A voice search started: later times count from here. */
-  start(): void {
+  /** A voice search (or, in the wheel log, a ✈ tap) started: later times count from here. */
+  start(kind: DiagKind = 'voice', v: unknown = 'start'): void {
     this.t0 = this.now();
-    this.push('voice', 'start');
+    this.push(kind, v);
   }
 
   push(kind: DiagKind, v: unknown): void {
-    this.items.push({ t: Math.round(this.now() - this.t0), kind, text: sanitize(v) });
+    const text = sanitize(v), last = this.items[this.items.length - 1];
+    if (this.collapse && last && last.kind === kind && last.text === text) { last.n++; return; }
+    this.items.push({ t: Math.round(this.now() - this.t0), kind, text, n: 1 });
     if (this.items.length > this.max) this.items.shift();
   }
 
@@ -56,6 +62,6 @@ export class Diag {
 
   /** Oldest first: "+1234 sttEnded {"type":"sttEnded","transcript":"take me to Tokyo"}". */
   lines(): string[] {
-    return this.items.map(e => `+${e.t} ${e.kind} ${e.text}`);
+    return this.items.map(e => `+${e.t} ${e.kind} ${e.text}${e.n > 1 ? ` ×${e.n}` : ''}`);
   }
 }

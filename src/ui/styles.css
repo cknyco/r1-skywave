@@ -1,7 +1,8 @@
 /* src/ui/styles.css: the map app (Task 18). main.ts sizes #app from innerWidth × innerHeight (Ruling 19). */
 html, body { margin: 0; overflow: hidden; background: #06080d; color: #f4efe6;
   font: 12px/1.3 system-ui, -apple-system, Roboto, sans-serif; }
-#app { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+/* visible: index.html hides #app until this sheet is in (no flash of unstyled buttons on a slow first load). */
+#app { position: relative; width: 100vw; height: 100vh; overflow: hidden; visibility: visible; }
 #map { position: absolute; left: 0; top: 0; touch-action: none; }
 /* The WebGL globe's canvas over the map; a finger still reaches the map under it. */
 #globe { position: absolute; left: 0; top: 0; pointer-events: none; }

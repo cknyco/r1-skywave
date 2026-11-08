@@ -79,8 +79,9 @@ describe('fly mode (Ruling 49)', () => {
     expect(s.mode).toBe('fly');
     expect(s.moving).toBe(true);
     expect(flyEnds(s)).toBe(Infinity);
-    expect(flyNext(s, 'tick', 9000).mode).toBe('fly');
-    expect(flyEnds(flyNext(s, 'rest', 9000))).toBe(9000 + FLY_MS);
+    expect(flyNext(s, 'tick', 100 + FLY_MS + 5000).mode).toBe('fly');   // long past FLY_MS, but still flying
+    const late = 100 + FLY_MS + 6000;
+    expect(flyEnds(flyNext(s, 'rest', late))).toBe(late + FLY_MS);
   });
 
   it('a second tap ends it at once, at rest or in flight, and a late tick does not bring it back', () => {
@@ -117,7 +118,14 @@ describe('fly mode (Ruling 49)', () => {
 
   it('takes another length', () => {
     expect(flyEnds(flyNext(FLY_OFF, 'tap', 0, 1000))).toBe(1000);
-    expect(FLY_MS).toBe(3000);
+  });
+
+  it('lasts 30 s of rest (the user\'s decision of 2026-11-08; 3 s ran out while he listened after a landing)', () => {
+    expect(FLY_MS).toBe(30000);
+    const s = last([['tap', 0], ['step', 2000], ['moving', 2000], ['rest', 2500]]);   // a hop of 500 ms
+    expect(flyNext(s, 'tick', 2500 + 29999).mode).toBe('fly');
+    expect(flyNext(s, 'step', 2500 + 29999).mode).toBe('fly');   // a wheel step 29.999 s after the landing still flies
+    expect(flyNext(s, 'tick', 2500 + 30000).mode).toBe('volume');
   });
 });
 

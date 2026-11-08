@@ -1,4 +1,6 @@
-import { ABOUT, ABOUT_HINT, ABOUT_TITLE, DIAG_EMPTY, DIAG_TITLE, HINT, type ListView, type StripModel } from '../app/logic';
+import {
+  ABOUT, ABOUT_HINT, ABOUT_TITLE, DIAG_EMPTY, DIAG_TITLE, HINT, WHEEL_EMPTY, WHEEL_TITLE, type ListView, type StripModel,
+} from '../app/logic';
 import { VOLUME_SHOW_MS } from '../config';
 
 const byId = (id: string) => document.getElementById(id) as HTMLElement;
@@ -183,11 +185,13 @@ export class AppScreen {
    * Opens the About screen at its top with the globe line (the renderer the map uses, and why) and the voice log
    * (Ruling 44), oldest line first; or closes it.
    */
-  showAbout(open: boolean, diag: string[] = [], globe?: string): void {
+  showAbout(open: boolean, diag: string[] = [], globe?: string, wheel: string[] = []): void {
     this.about.hidden = !open;
     if (!open) return;
     this.diag.replaceChildren();
     if (globe) div(this.diag, '', globe, 'p');
+    div(this.diag, 'dhead', WHEEL_TITLE, 'p');   // 2026-10-18: what ✈ and the wheel did on the device
+    for (const line of wheel.length ? wheel : [WHEEL_EMPTY]) div(this.diag, '', line, 'p');
     div(this.diag, 'dhead', DIAG_TITLE, 'p');
     for (const line of diag.length ? diag : [DIAG_EMPTY]) div(this.diag, '', line, 'p');
     this.about.scrollTop = 0;

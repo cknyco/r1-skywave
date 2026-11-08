@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ZOOM_DEFAULT } from '../../src/config';
 import { atPlace, planFlight, sampleFlight } from '../../src/map/camera';
 
 describe('flights', () => {
@@ -27,6 +28,28 @@ describe('flights', () => {
     expect(f.dur).toBe(500);
     expect(f.peakZ).toBe(4);
     expect(sampleFlight(f, 250).cam.z).toBeCloseTo(4, 6);
+  });
+});
+
+describe('the start\'s dive (a flight of a given duration)', () => {
+  it('takes that long, eases the zoom straight from the globe to the landing and lands exactly', () => {
+    const from = { lon: 13.4, lat: 52.5, z: 0.99 }, to = { lon: 13.4, lat: 52.5, z: ZOOM_DEFAULT };
+    expect(planFlight(from, to, 0).dur).toBe(500);   // the plain short hop: the zoom waits for half of it
+    expect(sampleFlight(planFlight(from, to, 0), 240).cam.z).toBeCloseTo(0.99, 6);
+    const f = planFlight(from, to, 100, false, 1500);
+    expect(f.dur).toBe(1500);
+    let z = from.z;
+    for (let t = 100; t <= 1600; t += 25) {
+      const s = sampleFlight(f, t).cam;
+      expect(s.z).toBeGreaterThanOrEqual(z - 1e-9);   // never back out, never a pause longer than the ease's ends
+      expect(s.lon).toBeCloseTo(13.4, 9);
+      expect(s.lat).toBeCloseTo(52.5, 9);
+      z = s.z;
+    }
+    expect(sampleFlight(f, 100 + 750).cam.z).toBeCloseTo((0.99 + ZOOM_DEFAULT) / 2, 6);   // half way in time, half way in zoom
+    const end = sampleFlight(f, 1600);
+    expect(end.done).toBe(true);
+    expect(end.cam).toEqual(to);
   });
 });
 

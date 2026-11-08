@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { GL_FRAME_LIMIT_MS } from '../src/config';
 import { globeRadius } from '../src/geo/mercator';
 import { RAD } from '../src/geo/sphere';
 import { glFrame, projectGl, type GlFrame } from '../src/map/gl/frame';
@@ -284,20 +285,24 @@ test('a shader that does not compile: "globe: Canvas 2D, shader: ERROR: test", t
   expect(await canvas2d(page)).toBe(true);
 });
 
-test('a slow GPU: "globe: Canvas 2D, slow (2x.x ms)", the context is released, the Canvas 2D globe draws', async ({ page }) => {
+// The GPU's extra time per frame is GL_FRAME_LIMIT_MS + 10 ms (35 ms at the limit of 25), so the probe's median is over
+// the limit on any GPU, however fast its own frames (1.4 ms on Apple silicon; the 20 ms used at the limit of 12 would now
+// pass there).
+const SLOW_GPU_MS = GL_FRAME_LIMIT_MS + 10;
+test(`a slow GPU: "globe: Canvas 2D, slow (${SLOW_GPU_MS}+ ms)", the context is released, the Canvas 2D globe draws`, async ({ page }) => {
   await needWebGl(page);
-  await page.addInitScript(() => {
+  await page.addInitScript(extra => {
     const P = WebGLRenderingContext.prototype, read = P.readPixels as (...a: unknown[]) => void;
     (P as any).readPixels = function (this: WebGLRenderingContext, ...a: unknown[]) {
       const t = performance.now();
-      while (performance.now() - t < 20) { /* a GPU that needs 20 ms more per frame */ }
+      while (performance.now() - t < extra) { /* a GPU that needs `extra` ms more per frame */ }
       return read.apply(this, a);
     };
-  });
+  }, SLOW_GPU_MS);
   await tunedIn(page, '?place=Berlin');
-  // "slow (2x.x ms)" here; a software GPU (CI) adds its own frame time to the 20 ms, so only the floor is checked.
+  // "slow (3x.x ms)" here; a software GPU (CI) adds its own frame time to SLOW_GPU_MS, so only the floor is checked.
   const text = await decided(page), ms = Number(/^globe: Canvas 2D, slow \((\d+\.\d) ms\)$/.exec(text)?.[1]);
-  expect(ms, text).toBeGreaterThanOrEqual(20);
+  expect(ms, text).toBeGreaterThanOrEqual(SLOW_GPU_MS);
   expect(await page.evaluate(() => (document.getElementById('globe') as HTMLCanvasElement).getContext('webgl')!.isContextLost())).toBe(true);
   expect(await page.evaluate(() => (window as any).__view.gl)).toBeNull();
   await look(page, EUROPE);

@@ -30,8 +30,11 @@ async function throttled(page: Page, rate: number): Promise<CDPSession> {
   return cdp;
 }
 
-/** The app at `query` (?place=Berlin), zoom 7 (ZOOM_DEFAULT), once the map has drawn its dots. */
-async function open(page: Page, query = '?place=Berlin'): Promise<void> {
+/**
+ * The app at `query` once the map has drawn its dots: Berlin at zoom 7, pinned with ?z=7. These checks were measured at
+ * 7, the landing before the user chose 5 (ZOOM_DEFAULT, 2026-10-18): a handful of dots, isolated enough for offCentre.
+ */
+async function open(page: Page, query = '?place=Berlin&z=7'): Promise<void> {
   await page.goto(`/${query}`);
   await page.waitForFunction(() => (window as any).__view?.dots.length > 0, null, { timeout: 60000 });
 }
@@ -180,7 +183,7 @@ test('six place-to-place flights in tile mode: median frame work under 16 ms at 
 test('a far flight (Berlin to Tokyo) arcs through the globe: globe frames under 33 ms at 6x, tiles fetched only near the end', async ({ page }) => {
   test.setTimeout(120000);
   const cdp = await throttled(page, 6);
-  await open(page, '?place=Berlin&globe=2d');   // the Canvas 2D globe: the fallback, the r1's worst case
+  await open(page, '?place=Berlin&globe=2d&z=7');   // the Canvas 2D globe: the fallback, the r1's worst case
   const ratio = await slowdown(page, cdp, 6);
   expect(ratio).toBeGreaterThan(3);
   const hits0 = tileHits;
@@ -335,7 +338,7 @@ test('the ring is 10 px; a dot left 20 px off-centre is caught when the map rest
 // mouse: pointerdown on the map holds it, pointerup lets it go.
 test('a finger held still on the map never glides; letting go does', async ({ page }) => {
   await fakeStreams(page);
-  await tuneIn(page);
+  await tuneIn(page, '?place=Berlin&z=7');   // Berlin at zoom 7, as open()
   await page.waitForFunction(() => (window as any).__view?.dots.length > 0);
   await settled(page);
   const t = await offCentre(page);
@@ -353,7 +356,7 @@ test('a finger held still on the map never glides; letting go does', async ({ pa
 
 test('a drag that starts during the glide takes over at once', async ({ page }) => {
   await fakeStreams(page);
-  await tuneIn(page);
+  await tuneIn(page, '?place=Berlin&z=7');   // Berlin at zoom 7, as open()
   await page.waitForFunction(() => (window as any).__view?.dots.length > 0);
   await settled(page);
   const t = await offCentre(page);
@@ -371,7 +374,7 @@ test('a drag that starts during the glide takes over at once', async ({ page }) 
 
 test('a tap on the map stops the glide; letting go glides on into the ring', async ({ page }) => {
   await fakeStreams(page);
-  await tuneIn(page);
+  await tuneIn(page, '?place=Berlin&z=7');   // Berlin at zoom 7, as open()
   await page.waitForFunction(() => (window as any).__view?.dots.length > 0);
   await settled(page);
   const t = await offCentre(page);

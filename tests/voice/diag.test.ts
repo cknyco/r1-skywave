@@ -40,4 +40,29 @@ describe('voice log (Ruling 44)', () => {
     ]);
     expect(d.entries()).toHaveLength(3);
   });
+
+  it('the wheel log (2026-10-18): timed from the latest ✈ tap, a run of equal events in one line', () => {
+    let now = 1000;
+    const d = new Diag(4, () => now, true);
+    d.push('wheel', 'step → volume');
+    now = 2000;
+    d.start('fly', 'tap → fly 3000 ms left');
+    now = 2400;
+    d.push('wheel', 'step → volume');
+    now = 2500;
+    d.push('wheel', 'step → volume');
+    d.push('wheel', 'step → volume');
+    now = 2600;
+    d.push('fly', 'moving → volume');
+    expect(d.lines()).toEqual([
+      '+0 wheel step → volume',   // timed when it happened, from the log's own start
+      '+0 fly tap → fly 3000 ms left',
+      '+400 wheel step → volume ×3',
+      '+600 fly moving → volume',
+    ]);
+    const plain = new Diag(4, () => now);   // the voice log keeps every event on its own line
+    plain.push('other', 'a');
+    plain.push('other', 'a');
+    expect(plain.lines()).toEqual(['+0 other a', '+0 other a']);
+  });
 });

@@ -5,9 +5,14 @@ export const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
 
 export interface Flight { from: Cam; to: Cam; a: Vec3; b: Vec3; t0: number; dur: number; peakZ: number }
 
-/** A flight from one camera to another; a glide (glide true) is always the short hop, however far it goes. */
-export function planFlight(from: Cam, to: Cam, t0: number, glide = false): Flight {
+/**
+ * A flight from one camera to another; a glide (glide true) is always the short hop, however far it goes. A flight of
+ * ms > 0 takes ms and eases its zoom straight from one end to the other (the start's dive from the whole globe), where
+ * a short hop would hold the zoom for its first half and do the whole climb in the last 250 ms.
+ */
+export function planFlight(from: Cam, to: Cam, t0: number, glide = false, ms = 0): Flight {
   const a = toVec(from.lon, from.lat), b = toVec(to.lon, to.lat);
+  if (ms > 0) return { from, to, a, b, t0, dur: ms, peakZ: (from.z + to.z) / 2 };
   const om = angleBetween(a, b);
   const short = glide || om < 2 * RAD;
   const dn = Math.min(1, om / Math.PI);
