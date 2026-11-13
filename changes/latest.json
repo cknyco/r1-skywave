@@ -1,129 +1,34 @@
 {
-  "added": 80,
+  "added": 23,
   "baseline": false,
   "byCountry": {
     "AR": {
-      "added": 2,
-      "changed": 0,
-      "removed": 3
-    },
-    "AT": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "BE": {
-      "added": 0,
-      "changed": 0,
-      "removed": 3
-    },
-    "BO": {
-      "added": 1,
-      "changed": 0,
-      "removed": 1
-    },
-    "BR": {
-      "added": 2,
-      "changed": 0,
-      "removed": 2
-    },
-    "BY": {
       "added": 1,
       "changed": 0,
       "removed": 0
-    },
-    "CA": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "CD": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "CL": {
-      "added": 0,
-      "changed": 0,
-      "removed": 2
-    },
-    "CN": {
-      "added": 3,
-      "changed": 0,
-      "removed": 3
-    },
-    "CO": {
-      "added": 2,
-      "changed": 0,
-      "removed": 1
-    },
-    "CZ": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
     },
     "DE": {
-      "added": 8,
+      "added": 10,
       "changed": 0,
-      "removed": 3
+      "removed": 0
     },
     "ES": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "FR": {
       "added": 1,
       "changed": 0,
-      "removed": 1
-    },
-    "GB": {
-      "added": 3,
-      "changed": 0,
-      "removed": 3
+      "removed": 0
     },
     "GR": {
-      "added": 5,
-      "changed": 0,
-      "removed": 1
-    },
-    "HR": {
-      "added": 3,
-      "changed": 0,
-      "removed": 0
-    },
-    "HT": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "HU": {
-      "added": 0,
-      "changed": 0,
-      "removed": 2
-    },
-    "ID": {
-      "added": 2,
-      "changed": 0,
-      "removed": 1
-    },
-    "IE": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "IL": {
+    "GT": {
       "added": 1,
       "changed": 0,
       "removed": 0
-    },
-    "IN": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
     },
     "IT": {
-      "added": 3,
+      "added": 1,
       "changed": 0,
       "removed": 0
     },
@@ -132,125 +37,30 @@
       "changed": 0,
       "removed": 1
     },
-    "LT": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "MG": {
+    "MA": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "MK": {
+    "MZ": {
+      "added": 0,
+      "changed": 0,
+      "removed": 1
+    },
+    "TT": {
       "added": 1,
       "changed": 0,
       "removed": 0
-    },
-    "MQ": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "MX": {
-      "added": 2,
-      "changed": 0,
-      "removed": 4
-    },
-    "NG": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "NI": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "NL": {
-      "added": 3,
-      "changed": 0,
-      "removed": 2
-    },
-    "NO": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "PL": {
-      "added": 3,
-      "changed": 0,
-      "removed": 2
-    },
-    "PR": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "PT": {
-      "added": 1,
-      "changed": 0,
-      "removed": 2
-    },
-    "RO": {
-      "added": 2,
-      "changed": 0,
-      "removed": 4
-    },
-    "RU": {
-      "added": 2,
-      "changed": 0,
-      "removed": 3
-    },
-    "TH": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "TR": {
-      "added": 1,
-      "changed": 0,
-      "removed": 2
-    },
-    "TZ": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "UA": {
-      "added": 0,
-      "changed": 0,
-      "removed": 2
-    },
-    "UG": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "UM": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
     },
     "US": {
-      "added": 21,
+      "added": 6,
       "changed": 0,
-      "removed": 8
-    },
-    "UY": {
-      "added": 1,
-      "changed": 0,
-      "removed": 1
-    },
-    "VE": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
+      "removed": 2
     }
   },
   "changed": 0,
-  "date": "2026-11-12",
-  "removed": 71,
-  "total": 10277,
+  "date": "2026-11-13",
+  "removed": 4,
+  "total": 10296,
   "v": 1
 }
