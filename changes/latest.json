@@ -1,14 +1,29 @@
 {
-  "added": 23,
+  "added": 36,
   "baseline": false,
   "byCountry": {
     "AR": {
+      "added": 2,
+      "changed": 0,
+      "removed": 0
+    },
+    "AT": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "DE": {
-      "added": 10,
+    "CO": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "EC": {
+      "added": 0,
+      "changed": 0,
+      "removed": 1
+    },
+    "EE": {
+      "added": 1,
       "changed": 0,
       "removed": 0
     },
@@ -17,50 +32,80 @@
       "changed": 0,
       "removed": 0
     },
+    "FR": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "GB": {
+      "added": 0,
+      "changed": 0,
+      "removed": 1
+    },
     "GR": {
+      "added": 4,
+      "changed": 0,
+      "removed": 0
+    },
+    "ID": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "GT": {
+    "MT": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "IT": {
+    "MX": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "JP": {
-      "added": 0,
-      "changed": 0,
-      "removed": 1
-    },
-    "MA": {
+    "PH": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "MZ": {
-      "added": 0,
+    "PL": {
+      "added": 1,
       "changed": 0,
-      "removed": 1
+      "removed": 0
     },
-    "TT": {
+    "RO": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "TR": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "UA": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "US": {
-      "added": 6,
+      "added": 15,
       "changed": 0,
-      "removed": 2
+      "removed": 0
+    },
+    "UY": {
+      "added": 1,
+      "changed": 0,
+      "removed": 1
+    },
+    "ZA": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
     }
   },
   "changed": 0,
-  "date": "2026-11-13",
-  "removed": 4,
-  "total": 10296,
+  "date": "2026-11-14",
+  "removed": 3,
+  "total": 10329,
   "v": 1
 }
