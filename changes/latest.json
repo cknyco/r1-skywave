@@ -1,8 +1,18 @@
 {
-  "added": 38,
+  "added": 39,
   "baseline": false,
   "byCountry": {
+    "AG": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
     "AR": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "BA": {
       "added": 1,
       "changed": 0,
       "removed": 0
@@ -12,70 +22,95 @@
       "changed": 0,
       "removed": 0
     },
-    "BR": {
-      "added": 7,
+    "BG": {
+      "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "CZ": {
+    "BO": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "BR": {
+      "added": 2,
+      "changed": 0,
+      "removed": 2
+    },
+    "CL": {
+      "added": 1,
+      "changed": 0,
+      "removed": 0
+    },
+    "CN": {
+      "added": 0,
+      "changed": 0,
+      "removed": 1
+    },
+    "CO": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "DE": {
-      "added": 1,
+      "added": 3,
       "changed": 0,
-      "removed": 0
-    },
-    "ES": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
+      "removed": 3
     },
     "FR": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "GB": {
+    "GR": {
+      "added": 5,
+      "changed": 0,
+      "removed": 0
+    },
+    "HR": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "GR": {
+    "IE": {
       "added": 1,
       "changed": 0,
       "removed": 0
+    },
+    "MW": {
+      "added": 0,
+      "changed": 0,
+      "removed": 2
     },
     "NL": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
-    "NO": {
-      "added": 3,
-      "changed": 0,
-      "removed": 0
-    },
-    "PL": {
-      "added": 1,
-      "changed": 0,
-      "removed": 0
-    },
-    "TR": {
+    "RO": {
       "added": 1,
       "changed": 0,
       "removed": 0
     },
     "US": {
-      "added": 17,
+      "added": 12,
       "changed": 0,
-      "removed": 2
+      "removed": 0
+    },
+    "UY": {
+      "added": 2,
+      "changed": 0,
+      "removed": 1
+    },
+    "VE": {
+      "added": 2,
+      "changed": 0,
+      "removed": 0
     }
   },
   "changed": 0,
-  "date": "2026-11-15",
-  "removed": 2,
-  "total": 10365,
+  "date": "2026-11-16",
+  "removed": 9,
+  "total": 10395,
   "v": 1
 }
